@@ -18,6 +18,10 @@ API_KEY = os.getenv("GEMINI_API_KEY")
 def init_db():
     conn = sqlite3.connect("quiz_data.db")
     cursor = conn.cursor()
+    
+    # 🌟 強制刪除舊版成績表，解決 500 錯誤 (重建包含 detail 的新表)
+    cursor.execute("DROP TABLE IF EXISTS records")
+    
     cursor.execute("CREATE TABLE IF NOT EXISTS temp_qs (id INTEGER PRIMARY KEY, data TEXT)")
     cursor.execute("CREATE TABLE IF NOT EXISTS final_qs (id INTEGER PRIMARY KEY, data TEXT)")
     cursor.execute("CREATE TABLE IF NOT EXISTS records (emp_id TEXT PRIMARY KEY, name TEXT, score INTEGER, detail TEXT)")
@@ -46,7 +50,7 @@ async def generate_quiz(files: List[UploadFile] = File(...)):
     for f in files: 
         all_text += f"\n\n[File: {f.filename}]\n{await extract_text(f)}"
     
-    # 🌟 一次生成 20 題，保證不超時
+    # 一次生 20 題，避免網頁等待超時跳掉
     prompt = f"針對內文設計「20題」繁體中文單選題。格式為 JSON 陣列，包含 q, options(A,B,C,D), ans(A/B/C/D)。不要Markdown。內容：{all_text[:5000]}"
     
     url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={API_KEY}"
@@ -58,11 +62,12 @@ async def generate_quiz(files: List[UploadFile] = File(...)):
             if match:
                 parsed = json.loads(match.group())
                 conn = sqlite3.connect("quiz_data.db")
-                # 🌟 讀取舊草稿並累加
+                # 讀取舊草稿並累加
                 old = conn.execute("SELECT data FROM temp_qs WHERE id=1").fetchone()
                 existing = json.loads(old[0]) if old else []
                 new_qs = [{"id": len(existing)+i+1, "q": x['q'], "options": x['options'], "ans": x['ans']} for i, x in enumerate(parsed[:20])]
                 combined = existing + new_qs
+                
                 conn.execute("INSERT OR REPLACE INTO temp_qs (id, data) VALUES (1, ?)", (json.dumps(combined),))
                 conn.commit(); conn.close()
                 return {"status": "ok", "count": len(combined)}
@@ -76,7 +81,6 @@ async def clear_temp():
     conn.commit(); conn.close()
     return {"status": "ok"}
 
-# 其他行政功能 (get-questions, submit, records 等保持上一版不變)
 @app.get("/get-questions")
 async def get_qs(emp_id: str):
     conn = sqlite3.connect("quiz_data.db")
@@ -85,7 +89,9 @@ async def get_qs(emp_id: str):
     data = conn.execute("SELECT data FROM final_qs WHERE id=1").fetchone()
     conn.close()
     if not data: raise HTTPException(status_code=400, detail="題庫未就緒")
+    
     all_qs = json.loads(data[0])
+    # 從大題庫中隨機抽 20 題給夥伴
     return random.sample(all_qs, min(20, len(all_qs)))
 
 @app.post("/submit")
@@ -114,7 +120,7 @@ async def get_temp():
 async def publish(data: List[dict]):
     conn = sqlite3.connect("quiz_data.db")
     conn.execute("DELETE FROM final_qs")
-    conn.execute("DELETE FROM temp_qs")
+    conn.execute("DELETE FROM temp_qs") # 發布後自動清空草稿區
     conn.execute("INSERT INTO final_qs (id, data) VALUES (1, ?)", (json.dumps(data),))
     conn.commit(); conn.close()
     return {"status": "ok"}
