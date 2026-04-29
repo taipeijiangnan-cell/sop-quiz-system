@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 
-// 🌟 請確認這裡是你的 Render 網址 (不要有結尾的 /)
-const API_BASE = "https://sop-quiz-api.onrender.com"; 
+// 🌟 確保這裡是你的 Render 網址 (不要有結尾的 /)
+const API_BASE = "[https://sop-quiz-api.onrender.com](https://sop-quiz-api.onrender.com)"; 
 
 function App() {
   const [isAdmin, setIsAdmin] = useState(window.location.pathname === '/admin');
@@ -95,15 +95,10 @@ function AdminPanel() {
         fetch(`${API_BASE}/admin/current-final`),
         fetch(`${API_BASE}/admin/records`)
       ]);
-      const t = await tRes.json();
-      const f = await fRes.json();
-      const r = await rRes.json();
-      setTempQs(t || []);
-      setFinalQs(f || []);
-      setRecords(r || []);
-    } catch (e) { 
-      console.error("資料載入失敗，等待伺服器喚醒中..."); 
-    }
+      setTempQs(await tRes.json() || []);
+      setFinalQs(await fRes.json() || []);
+      setRecords(await rRes.json() || []);
+    } catch (e) { console.error("資料載入失敗，等待伺服器喚醒中..."); }
   };
 
   useEffect(() => { fetchData(); }, []);
@@ -115,17 +110,17 @@ function AdminPanel() {
     try {
       const res = await fetch(`${API_BASE}/generate-quiz`, { method: 'POST', body: formData });
       if (res.ok) {
-        alert("✅ 20 題已成功加入草稿！如需更多題數可再次上傳。");
+        alert("✅ 題目已成功加入草稿區！");
         fetchData();
       } else {
-        alert("❌ 生成失敗，可能是檔案太大或 API 設定錯誤。");
+        alert("❌ 生成失敗 (500錯誤)，但系統已啟動防呆過濾，請再上傳一次即可。");
       }
-    } catch (e) { alert("連線超時，請檢查網路或稍後重試。"); }
+    } catch (e) { alert("連線超時，請稍後刷新網頁。"); }
     setLoading(false);
   };
 
   const clearTemp = async () => {
-    if (window.confirm("確定要清空目前的草稿重新產生嗎？")) {
+    if (window.confirm("確定要清空目前的草稿嗎？")) {
       await fetch(`${API_BASE}/admin/temp-clear`, { method: 'DELETE' });
       fetchData();
     }
@@ -148,6 +143,15 @@ function AdminPanel() {
       await fetch(`${API_BASE}/admin/records/clear`, { method: 'DELETE' });
       fetchData();
     }
+  };
+
+  // 🌟 新增：更新草稿區的單一欄位
+  const updateDraft = (id, field, value) => {
+    setTempQs(tempQs.map(q => q.id === id ? { ...q, [field]: value } : q));
+  };
+  // 🌟 新增：更新草稿區的特定選項 (A, B, C, D)
+  const updateOption = (id, optKey, value) => {
+    setTempQs(tempQs.map(q => q.id === id ? { ...q, options: { ...q.options, [optKey]: value } } : q));
   };
 
   return (
@@ -175,11 +179,54 @@ function AdminPanel() {
             </div>
           </div>
 
+          {/* 🌟 修改：全新的可編輯草稿區 */}
           {tempQs.length > 0 && (
             <div style={{ marginTop: '20px', padding: '15px', backgroundColor: '#fff3cd', borderRadius: '10px' }}>
-              <h4 style={{ margin: '0 0 10px 0' }}>🆕 準備發布的草稿 ({tempQs.length} 題)</h4>
-              <div style={{ height: '200px', overflowY: 'auto', backgroundColor: '#fff', padding: '10px', marginBottom: '10px', fontSize: '13px' }}>
-                {tempQs.map((q, i) => <div key={i} style={{ borderBottom: '1px dotted #ccc', paddingBottom: '5px', marginBottom: '5px' }}>{q.id}. {q.q} <span style={{color:'green'}}>(答案:{q.ans})</span></div>)}
+              <h4 style={{ margin: '0 0 10px 0' }}>🆕 準備發布的草稿 ({tempQs.length} 題) - <span style={{color: '#d35400'}}>可直接點擊框框修改</span></h4>
+              
+              <div style={{ height: '400px', overflowY: 'auto', backgroundColor: '#fff', padding: '15px', marginBottom: '10px', borderRadius: '8px' }}>
+                {tempQs.map((q) => (
+                  <div key={q.id} style={{ borderBottom: '2px solid #ddd', paddingBottom: '15px', marginBottom: '15px' }}>
+                    <div style={{ fontWeight: 'bold', marginBottom: '5px', color: '#2c3e50' }}>第 {q.id} 題：</div>
+                    
+                    {/* 編輯題目 */}
+                    <textarea 
+                      value={q.q} 
+                      onChange={(e) => updateDraft(q.id, 'q', e.target.value)} 
+                      style={{ width: '100%', padding: '10px', marginBottom: '10px', borderRadius: '5px', border: '1px solid #ccc', boxSizing: 'border-box', fontFamily: 'inherit' }}
+                      rows="2"
+                    />
+                    
+                    {/* 編輯選項 */}
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
+                      {['A', 'B', 'C', 'D'].map(opt => (
+                        <div key={opt} style={{ display: 'flex', alignItems: 'center' }}>
+                          <span style={{ marginRight: '8px', fontWeight: 'bold' }}>{opt}.</span>
+                          <input 
+                            value={q.options[opt] || ""} 
+                            onChange={(e) => updateOption(q.id, opt, e.target.value)} 
+                            style={{ flex: 1, padding: '8px', borderRadius: '4px', border: '1px solid #ccc' }}
+                          />
+                        </div>
+                      ))}
+                    </div>
+                    
+                    {/* 編輯正確答案 */}
+                    <div style={{ marginTop: '12px', fontWeight: 'bold', color: '#27ae60', display: 'flex', alignItems: 'center' }}>
+                      正確答案：
+                      <select 
+                        value={q.ans} 
+                        onChange={(e) => updateDraft(q.id, 'ans', e.target.value)}
+                        style={{ marginLeft: '10px', padding: '8px', borderRadius: '4px', border: '1px solid #27ae60', backgroundColor: '#e9f7ef', fontWeight: 'bold' }}
+                      >
+                        <option value="A">A</option>
+                        <option value="B">B</option>
+                        <option value="C">C</option>
+                        <option value="D">D</option>
+                      </select>
+                    </div>
+                  </div>
+                ))}
               </div>
               <button onClick={publish} style={{ ...btnStyle, backgroundColor: '#27ae60', width: '100%', margin: 0 }}>✅ 確認內容並正式發布</button>
             </div>
@@ -208,21 +255,22 @@ function AdminPanel() {
         </div>
       </div>
 
+      {/* 詳細作答報告彈窗 */}
       {showDetail && (
         <div style={modalOverlayStyle}>
           <div style={modalStyle}>
-            <h3>夥伴 {showDetail.name} 的作答報告</h3>
-            <div style={{ maxHeight: '400px', overflowY: 'auto', textAlign: 'left' }}>
+            <h3 style={{ color: '#2c3e50' }}>夥伴 {showDetail.name} 的作答報告</h3>
+            <div style={{ maxHeight: '500px', overflowY: 'auto', textAlign: 'left', padding: '10px' }}>
               {showDetail.detail.map((d, i) => (
-                <div key={i} style={{ padding: '10px 0', borderBottom: '1px solid #eee' }}>
-                  <p style={{ margin: '0 0 5px 0' }}><b>Q: {d.q}</b></p>
-                  <p style={{ margin: 0, color: d.isCorrect ? '#27ae60' : '#e74c3c' }}>
+                <div key={i} style={{ padding: '15px', borderBottom: '1px solid #eee', backgroundColor: d.isCorrect ? '#f9fff9' : '#fff9f9', marginBottom: '10px', borderRadius: '8px' }}>
+                  <p style={{ margin: '0 0 8px 0', fontSize: '15px' }}><b>Q: {d.q}</b></p>
+                  <p style={{ margin: 0, color: d.isCorrect ? '#27ae60' : '#e74c3c', fontWeight: 'bold' }}>
                     夥伴答: {d.userAns} | 正確答: {d.correctAns} {d.isCorrect ? '✅' : '❌'}
                   </p>
                 </div>
               ))}
             </div>
-            <button onClick={() => setShowDetail(null)} style={{ ...btnStyle, marginTop: '20px', width: '100%', margin: 0 }}>關閉</button>
+            <button onClick={() => setShowDetail(null)} style={{ ...btnStyle, marginTop: '20px', width: '100%', margin: 0 }}>關閉報告</button>
           </div>
         </div>
       )}
@@ -230,6 +278,7 @@ function AdminPanel() {
   );
 }
 
+// 共用樣式
 const inputStyle = { padding: '12px', margin: '10px 0', width: '100%', borderRadius: '8px', border: '1px solid #bdc3c7', boxSizing: 'border-box' };
 const btnStyle = { padding: '12px 24px', borderRadius: '8px', border: 'none', backgroundColor: '#3498db', color: 'white', fontWeight: 'bold', cursor: 'pointer' };
 const qBoxStyle = { marginBottom: '25px', padding: '20px', backgroundColor: '#f9f9f9', borderRadius: '12px', borderLeft: '5px solid #3498db' };
@@ -238,6 +287,6 @@ const thStyle = { padding: '12px', textAlign: 'left', borderBottom: '2px solid #
 const tdStyle = { padding: '12px' };
 const miniBtnStyle = { padding: '5px 10px', borderRadius: '5px', border: '1px solid #3498db', color: '#3498db', backgroundColor: 'transparent', cursor: 'pointer' };
 const modalOverlayStyle = { position: 'fixed', top: 0, left: 0, width: '100%', height: '100%', backgroundColor: 'rgba(0,0,0,0.6)', display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 1000 };
-const modalStyle = { backgroundColor: 'white', padding: '30px', borderRadius: '20px', width: '90%', maxWidth: '600px', textAlign: 'center' };
+const modalStyle = { backgroundColor: 'white', padding: '30px', borderRadius: '20px', width: '90%', maxWidth: '700px', textAlign: 'center' };
 
 export default App;
