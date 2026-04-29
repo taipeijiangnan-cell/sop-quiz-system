@@ -13,7 +13,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-API_KEY = "AIzaSyCbPteKj2GY1dLBzT9eLgDvFDkspeAhR0g"
+API_KEY = "AIzaSyBfpCjXCcQder9qsB2AVW6--DBsYj8tJpM"
 
 def init_db():
     conn = sqlite3.connect("quiz_data.db")
