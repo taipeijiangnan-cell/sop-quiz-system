@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 
-// 🌟 已經幫你修復了網址格式錯誤，現在是非常乾淨的字串了
-const API_BASE = "https://sop-quiz-api.onrender.com"; 
+// 🌟 保證乾淨的 API 網址，沒有多餘括號
+const API_BASE = "[https://sop-quiz-api.onrender.com](https://sop-quiz-api.onrender.com)"; 
 
 function App() {
   const [isAdmin, setIsAdmin] = useState(window.location.pathname === '/admin');
@@ -113,7 +113,9 @@ function AdminPanel() {
         alert("✅ 題目已成功加入草稿區！");
         fetchData();
       } else {
-        alert("❌ 生成失敗 (500錯誤)，但系統已啟動防呆過濾，請再上傳一次即可。");
+        // 🌟 防呆：精準顯示後端回傳的錯誤原因，不再只顯示 500
+        const errData = await res.json();
+        alert(`❌ 生成失敗: ${errData.detail}\n請稍後再試。`);
       }
     } catch (e) { alert("連線超時，請稍後刷新網頁。"); }
     setLoading(false);
@@ -147,7 +149,7 @@ function AdminPanel() {
     }
   };
 
-  // 🌟 新增：匯出 CSV 功能
+  // 🌟 匯出 CSV 功能
   const exportToCSV = () => {
     if (records.length === 0) return alert("目前沒有成績紀錄可以匯出！");
     
@@ -202,7 +204,7 @@ function AdminPanel() {
             </div>
           </div>
 
-          {/* 全新的可編輯草稿區 */}
+          {/* 可編輯草稿區 */}
           {tempQs.length > 0 && (
             <div style={{ marginTop: '20px', padding: '15px', backgroundColor: '#fff3cd', borderRadius: '10px' }}>
               <h4 style={{ margin: '0 0 10px 0' }}>🆕 準備發布的草稿 ({tempQs.length} 題) - <span style={{color: '#d35400'}}>可直接點擊框框修改</span></h4>
@@ -258,11 +260,12 @@ function AdminPanel() {
 
         {/* 成績區 */}
         <div style={cardStyle}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '15px' }}>
-            <h3 style={{ margin: 0 }}>📈 夥伴考核成績紀錄</h3>
+          {/* 🌟 重新設計排版，確保匯出和清空按鈕非常明顯 */}
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '15px', backgroundColor: '#ecf0f1', padding: '15px', borderRadius: '10px' }}>
+            <h3 style={{ margin: 0, color: '#2c3e50' }}>📈 夥伴成績紀錄</h3>
             <div>
-              <button onClick={exportToCSV} style={{ ...btnStyle, backgroundColor: '#2ecc71', padding: '8px 15px', marginRight: '10px', fontSize: '14px' }}>📥 匯出 Excel</button>
-              <button onClick={clearRecords} style={{ ...btnStyle, backgroundColor: '#e74c3c', padding: '8px 15px', fontSize: '14px' }}>🗑️ 清空成績</button>
+              <button onClick={exportToCSV} style={{ ...btnStyle, backgroundColor: '#2ecc71', padding: '8px 15px', marginRight: '10px', fontSize: '14px' }}>📥 匯出 Excel (CSV)</button>
+              <button onClick={clearRecords} style={{ ...btnStyle, backgroundColor: '#e74c3c', padding: '8px 15px', fontSize: '14px' }}>🗑️ 清空所有成績</button>
             </div>
           </div>
           
