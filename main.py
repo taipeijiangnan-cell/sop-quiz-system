@@ -13,7 +13,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# 抓取 API 金鑰 (自動清除可能的空白與隱形雙引號)
+# 抓取 API 金鑰並清空隱形空白
 raw_key = os.getenv("GEMINI_API_KEY", "")
 API_KEY = raw_key.strip().replace('"', '').replace("'", "")
 
@@ -64,32 +64,25 @@ async def generate_quiz(files: List[UploadFile] = File(...)):
     範例：[ {{"q": "題目", "options": {{"A": "選項A", "B": "選項B", "C": "選項C", "D": "選項D"}}, "ans": "A"}} ]
     內容：{all_text[:5000]}"""
     
-    # 🌟 自動切換模型引擎 (Auto-Fallback)
-    models_to_test = ["gemini-1.5-flash", "gemini-1.0-pro"]
-    success = False
-    last_error = ""
-    data = None
+    # 🌟 升級為 Google 最穩定的正式版 (v1) API 與標準模型
+    url = f"https://generativelanguage.googleapis.com/v1/models/gemini-1.5-flash:generateContent?key={API_KEY}"
     
-    for model_name in models_to_test:
-        url = f"https://generativelanguage.googleapis.com/v1beta/models/{model_name}:generateContent?key={API_KEY}"
-        try:
-            res = requests.post(url, json={"contents": [{"parts": [{"text": prompt}]}]}, timeout=90)
-            if res.status_code == 200:
-                data = res.json()
-                success = True
-                print(f"✅ 成功使用模型: {model_name}")
-                break # 成功了！跳出測試迴圈
-            else:
-                last_error = res.json().get('error', {}).get('message', res.text)
-                print(f"❌ 模型 {model_name} 失敗: {last_error}")
-        except Exception as e:
-            last_error = str(e)
-            print(f"❌ 連線 {model_name} 發生異常: {last_error}")
-
-    if not success:
-        raise HTTPException(status_code=500, detail=f"Google API 拒絕了請求，最後錯誤原因: {last_error}")
-        
     try:
+        res = requests.post(url, json={"contents": [{"parts": [{"text": prompt}]}]}, timeout=90)
+        
+        # 🌟 攔截各種錯誤並轉為白話文
+        if res.status_code != 200:
+            err_detail = res.json().get('error', {}).get('message', res.text)
+            print(f"API錯誤: {err_detail}")
+            
+            if res.status_code == 404 and "not found" in err_detail:
+                raise Exception("您目前的 API 金鑰被 Google 限制了模型權限！請至 Google AI Studio 申請一把「全新的金鑰」並更新到 Render 後台。")
+            elif res.status_code == 400:
+                raise Exception("您的 API 金鑰格式不正確！請檢查 Render 後台的設定。")
+            else:
+                raise Exception(f"Google 拒絕請求 (代碼: {res.status_code}) - {err_detail}")
+
+        data = res.json()
         if "candidates" not in data or not data["candidates"]:
             raise Exception("AI 沒有回傳任何內容，可能是觸發了安全阻擋。")
             
@@ -97,7 +90,7 @@ async def generate_quiz(files: List[UploadFile] = File(...)):
         
         match = re.search(r'\[.*\]', raw, re.DOTALL)
         if not match: 
-            raise Exception("AI 回傳的格式嚴重錯亂，找不到合法的 JSON 陣列。")
+            raise Exception("AI 回傳的格式嚴重錯亂，請再試一次。")
         
         parsed = json.loads(match.group())
         
@@ -127,9 +120,10 @@ async def generate_quiz(files: List[UploadFile] = File(...)):
         conn.commit()
         conn.close()
         return {"status": "ok", "count": len(combined)}
+    
     except Exception as e: 
-        print(f"資料處理異常: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"處理考卷資料時發生錯誤: {str(e)}")
+        print(f"處理異常: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 @app.delete("/admin/temp-clear")
 async def clear_temp():
