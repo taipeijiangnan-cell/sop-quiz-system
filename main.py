@@ -1,6 +1,6 @@
 from fastapi import FastAPI, HTTPException, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
-import json, io, pypdf, docx, requests, sqlite3, re
+import json, io, pypdf, docx, requests, sqlite3, re, os
 from typing import List
 
 app = FastAPI()
@@ -13,7 +13,8 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-API_KEY = "AIzaSyBfpCjXCcQder9qsB2AVW6--DBsYj8tJpM"
+# 🌟 改變這裡！不再把鑰匙寫死，而是去環境變數(保險箱)拿！
+API_KEY = os.getenv("GEMINI_API_KEY")
 
 def init_db():
     conn = sqlite3.connect("quiz_data.db")
