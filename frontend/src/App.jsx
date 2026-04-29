@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 
-// 🌟 確保這裡是你的 Render 網址 (不要有結尾的 /)
-const API_BASE = "[https://sop-quiz-api.onrender.com](https://sop-quiz-api.onrender.com)"; 
+// 🌟 已經幫你修復了網址格式錯誤，現在是非常乾淨的字串了
+const API_BASE = "https://sop-quiz-api.onrender.com"; 
 
 function App() {
   const [isAdmin, setIsAdmin] = useState(window.location.pathname === '/admin');
@@ -117,6 +117,8 @@ function AdminPanel() {
       }
     } catch (e) { alert("連線超時，請稍後刷新網頁。"); }
     setLoading(false);
+    // 重設 input file 讓同一個檔案可以重複選取上傳
+    e.target.value = null; 
   };
 
   const clearTemp = async () => {
@@ -139,17 +141,38 @@ function AdminPanel() {
   };
 
   const clearRecords = async () => {
-    if (window.confirm("確定要清空所有成績紀錄嗎？(無法復原)")) {
+    if (window.confirm("⚠️ 警告：確定要清空所有成績紀錄嗎？此動作無法復原！")) {
       await fetch(`${API_BASE}/admin/records/clear`, { method: 'DELETE' });
       fetchData();
     }
   };
 
-  // 🌟 新增：更新草稿區的單一欄位
+  // 🌟 新增：匯出 CSV 功能
+  const exportToCSV = () => {
+    if (records.length === 0) return alert("目前沒有成績紀錄可以匯出！");
+    
+    // 加入 BOM 以支援 Excel 顯示中文 UTF-8
+    let csvContent = "data:text/csv;charset=utf-8,\uFEFF"; 
+    csvContent += "工號,姓名,分數\n";
+
+    records.forEach(r => {
+      csvContent += `${r.emp_id},${r.name},${r.score}\n`;
+    });
+
+    const encodedUri = encodeURI(csvContent);
+    const link = document.createElement("a");
+    link.setAttribute("href", encodedUri);
+    link.setAttribute("download", "SOP_夥伴考核成績.csv");
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
+  // 更新草稿區的單一欄位
   const updateDraft = (id, field, value) => {
     setTempQs(tempQs.map(q => q.id === id ? { ...q, [field]: value } : q));
   };
-  // 🌟 新增：更新草稿區的特定選項 (A, B, C, D)
+  // 更新草稿區的特定選項 (A, B, C, D)
   const updateOption = (id, optKey, value) => {
     setTempQs(tempQs.map(q => q.id === id ? { ...q, options: { ...q.options, [optKey]: value } } : q));
   };
@@ -179,7 +202,7 @@ function AdminPanel() {
             </div>
           </div>
 
-          {/* 🌟 修改：全新的可編輯草稿區 */}
+          {/* 全新的可編輯草稿區 */}
           {tempQs.length > 0 && (
             <div style={{ marginTop: '20px', padding: '15px', backgroundColor: '#fff3cd', borderRadius: '10px' }}>
               <h4 style={{ margin: '0 0 10px 0' }}>🆕 準備發布的草稿 ({tempQs.length} 題) - <span style={{color: '#d35400'}}>可直接點擊框框修改</span></h4>
@@ -235,7 +258,14 @@ function AdminPanel() {
 
         {/* 成績區 */}
         <div style={cardStyle}>
-          <h3>📈 夥伴考核成績紀錄 <button onClick={clearRecords} style={{ ...miniBtnStyle, color: '#e74c3c', borderColor: '#e74c3c', float: 'right' }}>清空成績</button></h3>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '15px' }}>
+            <h3 style={{ margin: 0 }}>📈 夥伴考核成績紀錄</h3>
+            <div>
+              <button onClick={exportToCSV} style={{ ...btnStyle, backgroundColor: '#2ecc71', padding: '8px 15px', marginRight: '10px', fontSize: '14px' }}>📥 匯出 Excel</button>
+              <button onClick={clearRecords} style={{ ...btnStyle, backgroundColor: '#e74c3c', padding: '8px 15px', fontSize: '14px' }}>🗑️ 清空成績</button>
+            </div>
+          </div>
+          
           <table style={{ width: '100%', borderCollapse: 'collapse', marginTop: '10px' }}>
             <thead>
               <tr style={{ backgroundColor: '#ecf0f1' }}>
@@ -250,6 +280,9 @@ function AdminPanel() {
                   <td style={tdStyle}><button onClick={() => setShowDetail(r)} style={miniBtnStyle}>👀 查看</button></td>
                 </tr>
               ))}
+              {records.length === 0 && (
+                <tr><td colSpan="3" style={{ textAlign: 'center', padding: '20px', color: '#95a5a6' }}>目前尚無成績紀錄</td></tr>
+              )}
             </tbody>
           </table>
         </div>
@@ -261,7 +294,7 @@ function AdminPanel() {
           <div style={modalStyle}>
             <h3 style={{ color: '#2c3e50' }}>夥伴 {showDetail.name} 的作答報告</h3>
             <div style={{ maxHeight: '500px', overflowY: 'auto', textAlign: 'left', padding: '10px' }}>
-              {showDetail.detail.map((d, i) => (
+              {showDetail.detail && showDetail.detail.map((d, i) => (
                 <div key={i} style={{ padding: '15px', borderBottom: '1px solid #eee', backgroundColor: d.isCorrect ? '#f9fff9' : '#fff9f9', marginBottom: '10px', borderRadius: '8px' }}>
                   <p style={{ margin: '0 0 8px 0', fontSize: '15px' }}><b>Q: {d.q}</b></p>
                   <p style={{ margin: 0, color: d.isCorrect ? '#27ae60' : '#e74c3c', fontWeight: 'bold' }}>
