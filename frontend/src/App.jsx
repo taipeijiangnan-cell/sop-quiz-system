@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 
 // 🌟 保證乾淨的 API 網址，沒有多餘括號
-const API_BASE = "[https://sop-quiz-api.onrender.com](https://sop-quiz-api.onrender.com)"; 
+const API_BASE = "https://sop-quiz-api.onrender.com"; 
 
 function App() {
   const [isAdmin, setIsAdmin] = useState(window.location.pathname === '/admin');
