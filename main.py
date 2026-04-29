@@ -63,7 +63,11 @@ async def generate_quiz(files: List[UploadFile] = File(...)):
     內容：{all_text[:5000]}"""
     
     # 🌟 終極防禦：用字串拼接的方式，徹底避開複製貼上時的 Markdown 自動變換問題
-    url = "https://" + "[generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=](https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=)" + API_KEY
+   # 貼上這四行 (把網址切碎，徹底防止編輯器亂加括號)
+host_part1 = "https://generativelanguage"
+host_part2 = ".googleapis.com"
+path_part = "/v1beta/models/gemini-1.5-flash:generateContent?key="
+url = host_part1 + host_part2 + path_part + API_KEY
     
     try:
         res = requests.post(url, json={"contents": [{"parts": [{"text": prompt}]}]}, timeout=90)
