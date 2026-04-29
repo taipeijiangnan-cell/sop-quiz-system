@@ -1,6 +1,6 @@
 from fastapi import FastAPI, HTTPException, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
-import json, io, pypdf, docx, requests, sqlite3, re, os, random, base64
+import json, io, pypdf, docx, requests, sqlite3, re, os, random
 from typing import List
 
 app = FastAPI()
@@ -66,9 +66,11 @@ async def generate_quiz(files: List[UploadFile] = File(...)):
     範例：[ {{"q": "題目", "options": {{"A": "選項A", "B": "選項B", "C": "選項C", "D": "選項D"}}, "ans": "A"}} ]
     內容：{all_text[:5000]}"""
     
-    # 🌟 終極防禦大招：Base64 絕對網址，無懼任何編輯器的自動格式化或隱形空白
-    encoded_url = b"aHR0cHM6Ly9nZW5lcmF0aXZlbGFuZ3VhZ2UuZ29vZ2xlYXBpcy5jb20vdjFiZXRhL21vZGVscy9nZW1pbmktMS41LWZsYXNoOmdlbmVyYXRlQ29udGVudD9rZXk9"
-    url = base64.b64decode(encoded_url).decode('utf-8') + API_KEY.strip()
+    # 🌟 修正模型名稱：改為 Google 官方目前支援的 -latest 後綴版本
+    # 將網址切成兩段，防止編輯器雞婆幫忙加上 Markdown 超連結
+    host = "https://generativelanguage.googleapis.com"
+    path = "/v1beta/models/gemini-1.5-flash-latest:generateContent?key="
+    url = host + path + API_KEY.strip()
     
     try:
         res = requests.post(url, json={"contents": [{"parts": [{"text": prompt}]}]}, timeout=90)
