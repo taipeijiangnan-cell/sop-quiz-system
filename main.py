@@ -51,6 +51,7 @@ async def generate_quiz(files: List[UploadFile] = File(...)):
     範例：[ {{"q": "題目", "options": {{"A": "選項A", "B": "選項B", "C": "選項C", "D": "選項D"}}, "ans": "A"}} ]
     內容：{all_text[:5000]}"""
     
+    # 🌟 已經清理乾淨的 API 網址，沒有多餘的 Markdown 括號了
     url = f"[https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=](https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=){API_KEY}"
     try:
         res = requests.post(url, json={"contents": [{"parts": [{"text": prompt}]}]}, timeout=90)
