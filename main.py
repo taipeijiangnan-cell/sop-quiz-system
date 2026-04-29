@@ -13,7 +13,6 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# 記得在 Render 的 Environment 設定 GEMINI_API_KEY
 API_KEY = os.getenv("GEMINI_API_KEY")
 
 def init_db():
@@ -47,44 +46,53 @@ async def generate_quiz(files: List[UploadFile] = File(...)):
     for f in files: 
         all_text += f"\n\n[File: {f.filename}]\n{await extract_text(f)}"
     
-    prompt = f"請針對以下內文設計「50題」繁體中文單選題。格式為 JSON 陣列，包含 q, options(需有A,B,C,D), ans(為A,B,C或D)。不要Markdown。內容：{all_text}"
+    # 🌟 一次生成 20 題，保證不超時
+    prompt = f"針對內文設計「20題」繁體中文單選題。格式為 JSON 陣列，包含 q, options(A,B,C,D), ans(A/B/C/D)。不要Markdown。內容：{all_text[:5000]}"
     
     url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={API_KEY}"
     try:
-        res = requests.post(url, json={"contents": [{"parts": [{"text": prompt}]}]}, timeout=180)
+        res = requests.post(url, json={"contents": [{"parts": [{"text": prompt}]}]}, timeout=90)
         if res.status_code == 200:
             raw = res.json()['candidates'][0]['content']['parts'][0]['text']
             match = re.search(r'\[.*\]', raw, re.DOTALL)
             if match:
                 parsed = json.loads(match.group())
-                cleaned = [{"id": i+1, "q": x['q'], "options": x['options'], "ans": x['ans']} for i, x in enumerate(parsed[:50])]
                 conn = sqlite3.connect("quiz_data.db")
-                conn.execute("DELETE FROM temp_qs")
-                conn.execute("INSERT INTO temp_qs (id, data) VALUES (1, ?)", (json.dumps(cleaned),))
+                # 🌟 讀取舊草稿並累加
+                old = conn.execute("SELECT data FROM temp_qs WHERE id=1").fetchone()
+                existing = json.loads(old[0]) if old else []
+                new_qs = [{"id": len(existing)+i+1, "q": x['q'], "options": x['options'], "ans": x['ans']} for i, x in enumerate(parsed[:20])]
+                combined = existing + new_qs
+                conn.execute("INSERT OR REPLACE INTO temp_qs (id, data) VALUES (1, ?)", (json.dumps(combined),))
                 conn.commit(); conn.close()
-                return {"status": "ok", "count": len(cleaned)}
+                return {"status": "ok", "count": len(combined)}
     except Exception as e: print(f"生成異常: {e}")
     raise HTTPException(status_code=500, detail="生成失敗")
 
+@app.delete("/admin/temp-clear")
+async def clear_temp():
+    conn = sqlite3.connect("quiz_data.db")
+    conn.execute("DELETE FROM temp_qs")
+    conn.commit(); conn.close()
+    return {"status": "ok"}
+
+# 其他行政功能 (get-questions, submit, records 等保持上一版不變)
 @app.get("/get-questions")
 async def get_qs(emp_id: str):
     conn = sqlite3.connect("quiz_data.db")
     if conn.execute("SELECT score FROM records WHERE emp_id=?", (emp_id,)).fetchone():
-        conn.close(); raise HTTPException(status_code=403, detail="此工號已考過")
+        conn.close(); raise HTTPException(status_code=403, detail="此工號已完成考核")
     data = conn.execute("SELECT data FROM final_qs WHERE id=1").fetchone()
     conn.close()
     if not data: raise HTTPException(status_code=400, detail="題庫未就緒")
-    
     all_qs = json.loads(data[0])
-    selected = random.sample(all_qs, min(20, len(all_qs)))
-    return selected
+    return random.sample(all_qs, min(20, len(all_qs)))
 
 @app.post("/submit")
 async def submit(data: dict):
     name, emp_id, score, detail = data.get("user_name"), data.get("emp_id"), data.get("score"), data.get("detail")
     conn = sqlite3.connect("quiz_data.db")
-    conn.execute("INSERT OR REPLACE INTO records (emp_id, name, score, detail) VALUES (?, ?, ?, ?)", 
-                 (emp_id, name, score, json.dumps(detail)))
+    conn.execute("INSERT OR REPLACE INTO records (emp_id, name, score, detail) VALUES (?, ?, ?, ?)", (emp_id, name, score, json.dumps(detail)))
     conn.commit(); conn.close()
     return {"status": "ok"}
 
@@ -106,7 +114,7 @@ async def get_temp():
 async def publish(data: List[dict]):
     conn = sqlite3.connect("quiz_data.db")
     conn.execute("DELETE FROM final_qs")
-    conn.execute("DELETE FROM temp_qs") # 發布後清空草稿
+    conn.execute("DELETE FROM temp_qs")
     conn.execute("INSERT INTO final_qs (id, data) VALUES (1, ?)", (json.dumps(data),))
     conn.commit(); conn.close()
     return {"status": "ok"}
