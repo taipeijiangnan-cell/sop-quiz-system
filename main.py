@@ -13,6 +13,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# 記得在 Render 的 Environment 設定 GEMINI_API_KEY
 API_KEY = os.getenv("GEMINI_API_KEY")
 
 def init_db():
@@ -20,7 +21,6 @@ def init_db():
     cursor = conn.cursor()
     cursor.execute("CREATE TABLE IF NOT EXISTS temp_qs (id INTEGER PRIMARY KEY, data TEXT)")
     cursor.execute("CREATE TABLE IF NOT EXISTS final_qs (id INTEGER PRIMARY KEY, data TEXT)")
-    # 🌟 增加 detail 欄位存詳細作答
     cursor.execute("CREATE TABLE IF NOT EXISTS records (emp_id TEXT PRIMARY KEY, name TEXT, score INTEGER, detail TEXT)")
     conn.commit()
     conn.close()
@@ -47,8 +47,7 @@ async def generate_quiz(files: List[UploadFile] = File(...)):
     for f in files: 
         all_text += f"\n\n[File: {f.filename}]\n{await extract_text(f)}"
     
-    # 🌟 指令：一次生成 50 題
-    prompt = f"請針對以下內文設計「50題」繁體中文單選題，嚴禁重複。格式為 JSON 陣列，包含 q, options(A,B,C,D), ans(A/B/C/D)。內容：{all_text}"
+    prompt = f"請針對以下內文設計「50題」繁體中文單選題。格式為 JSON 陣列，包含 q, options(需有A,B,C,D), ans(為A,B,C或D)。不要Markdown。內容：{all_text}"
     
     url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={API_KEY}"
     try:
@@ -77,21 +76,17 @@ async def get_qs(emp_id: str):
     if not data: raise HTTPException(status_code=400, detail="題庫未就緒")
     
     all_qs = json.loads(data[0])
-    # 🌟 隨機抽取 20 題給夥伴
     selected = random.sample(all_qs, min(20, len(all_qs)))
     return selected
 
 @app.post("/submit")
 async def submit(data: dict):
-    # 🌟 接收詳細作答紀錄 (detail)
     name, emp_id, score, detail = data.get("user_name"), data.get("emp_id"), data.get("score"), data.get("detail")
     conn = sqlite3.connect("quiz_data.db")
     conn.execute("INSERT OR REPLACE INTO records (emp_id, name, score, detail) VALUES (?, ?, ?, ?)", 
                  (emp_id, name, score, json.dumps(detail)))
     conn.commit(); conn.close()
     return {"status": "ok"}
-
-# --- 店長工具專用 API ---
 
 @app.get("/admin/current-final")
 async def get_final():
@@ -111,6 +106,7 @@ async def get_temp():
 async def publish(data: List[dict]):
     conn = sqlite3.connect("quiz_data.db")
     conn.execute("DELETE FROM final_qs")
+    conn.execute("DELETE FROM temp_qs") # 發布後清空草稿
     conn.execute("INSERT INTO final_qs (id, data) VALUES (1, ?)", (json.dumps(data),))
     conn.commit(); conn.close()
     return {"status": "ok"}
