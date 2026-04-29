@@ -1,6 +1,6 @@
 from fastapi import FastAPI, HTTPException, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
-import json, io, pypdf, docx, requests, sqlite3, re, os, random
+import json, io, pypdf, docx, requests, sqlite3, re, os, random, base64
 from typing import List
 
 app = FastAPI()
@@ -13,7 +13,8 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-API_KEY = os.getenv("GEMINI_API_KEY")
+# 抓取 API 金鑰
+API_KEY = os.getenv("GEMINI_API_KEY", "")
 
 def init_db():
     conn = sqlite3.connect("quiz_data.db")
@@ -24,11 +25,10 @@ def init_db():
     # 建立包含 detail 欄位的新版資料表
     cursor.execute("CREATE TABLE IF NOT EXISTS records (emp_id TEXT PRIMARY KEY, name TEXT, score INTEGER, detail TEXT)")
     
-    # 🌟 自動升級防護罩：檢查是不是留存了沒有 detail 的舊表
+    # 自動升級防護罩
     try:
         cursor.execute("SELECT detail FROM records LIMIT 1")
     except sqlite3.OperationalError:
-        # 如果是舊表報錯，就砍掉重建
         cursor.execute("DROP TABLE IF EXISTS records")
         cursor.execute("CREATE TABLE IF NOT EXISTS records (emp_id TEXT PRIMARY KEY, name TEXT, score INTEGER, detail TEXT)")
         
@@ -53,37 +53,39 @@ async def extract_text(file: UploadFile):
 
 @app.post("/generate-quiz")
 async def generate_quiz(files: List[UploadFile] = File(...)):
+    # 🌟 防呆第一層：檢查金鑰是否存在
+    if not API_KEY or API_KEY.strip() == "":
+        raise HTTPException(status_code=500, detail="伺服器遺失 API 金鑰！請至 Render 的 Environment 檢查 GEMINI_API_KEY 是否填寫正確。")
+
     all_text = ""
     for f in files: 
         all_text += f"\n\n[File: {f.filename}]\n{await extract_text(f)}"
     
     prompt = f"""請針對內文設計「20題」繁體中文單選題。
-    必須嚴格回傳 JSON 陣列格式！不要加上 ```json 標籤，只要純陣列！
+    必須嚴格回傳 JSON 陣列格式！不要加上任何 markdown 標籤，只要純陣列！
     範例：[ {{"q": "題目", "options": {{"A": "選項A", "B": "選項B", "C": "選項C", "D": "選項D"}}, "ans": "A"}} ]
     內容：{all_text[:5000]}"""
     
-    # 🌟 終極防禦：將網址切成三塊，徹底避開任何編輯器的「自動加上超連結」功能
-    host_part1 = "https://generativelanguage"
-    host_part2 = ".googleapis.com"
-    path_part = "/v1beta/models/gemini-1.5-flash:generateContent?key="
-    url = host_part1 + host_part2 + path_part + API_KEY
+    # 🌟 終極防禦大招：Base64 絕對網址，無懼任何編輯器的自動格式化或隱形空白
+    encoded_url = b"aHR0cHM6Ly9nZW5lcmF0aXZlbGFuZ3VhZ2UuZ29vZ2xlYXBpcy5jb20vdjFiZXRhL21vZGVscy9nZW1pbmktMS41LWZsYXNoOmdlbmVyYXRlQ29udGVudD9rZXk9"
+    url = base64.b64decode(encoded_url).decode('utf-8') + API_KEY.strip()
     
     try:
         res = requests.post(url, json={"contents": [{"parts": [{"text": prompt}]}]}, timeout=90)
         if res.status_code != 200:
-            print(f"API錯誤: {res.text}")
-            raise Exception(f"Google API 拒絕請求，可能是金鑰無效或額度不足 (代碼: {res.status_code})")
+            # 🌟 防呆第三層：直接把 Google 拒絕的真實原因抓出來顯示給店長看
+            err_detail = res.json().get('error', {}).get('message', res.text)
+            print(f"API錯誤: {err_detail}")
+            raise Exception(f"Google API 錯誤 (代碼: {res.status_code}) - 詳細原因: {err_detail}")
             
         data = res.json()
         if "candidates" not in data or not data["candidates"]:
-            print(f"API 回傳異常或被阻擋: {data}")
             raise Exception("AI 沒有回傳任何題目，可能是內容觸發了安全阻擋機制。")
             
         raw = data['candidates'][0]['content']['parts'][0]['text']
         
         match = re.search(r'\[.*\]', raw, re.DOTALL)
         if not match: 
-            print(f"JSON 解析失敗，原始字串為: {raw}")
             raise Exception("AI 回傳的格式嚴重錯亂，找不到合法的 JSON。請再試一次。")
         
         parsed = json.loads(match.group())
@@ -178,7 +180,6 @@ async def get_recs():
         result = []
         for r in recs:
             try:
-                # 🌟 防止如果資料有損毀，自動跳過解析錯誤
                 det = json.loads(r[3]) if r[3] else []
             except:
                 det = []
