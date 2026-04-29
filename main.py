@@ -20,7 +20,18 @@ def init_db():
     cursor = conn.cursor()
     cursor.execute("CREATE TABLE IF NOT EXISTS temp_qs (id INTEGER PRIMARY KEY, data TEXT)")
     cursor.execute("CREATE TABLE IF NOT EXISTS final_qs (id INTEGER PRIMARY KEY, data TEXT)")
+    
+    # 建立包含 detail 欄位的新版資料表
     cursor.execute("CREATE TABLE IF NOT EXISTS records (emp_id TEXT PRIMARY KEY, name TEXT, score INTEGER, detail TEXT)")
+    
+    # 🌟 自動升級防護罩：檢查是不是留存了沒有 detail 的舊表
+    try:
+        cursor.execute("SELECT detail FROM records LIMIT 1")
+    except sqlite3.OperationalError:
+        # 如果是舊表報錯，就砍掉重建
+        cursor.execute("DROP TABLE IF EXISTS records")
+        cursor.execute("CREATE TABLE IF NOT EXISTS records (emp_id TEXT PRIMARY KEY, name TEXT, score INTEGER, detail TEXT)")
+        
     conn.commit()
     conn.close()
 
@@ -51,7 +62,6 @@ async def generate_quiz(files: List[UploadFile] = File(...)):
     範例：[ {{"q": "題目", "options": {{"A": "選項A", "B": "選項B", "C": "選項C", "D": "選項D"}}, "ans": "A"}} ]
     內容：{all_text[:5000]}"""
     
-    # 🌟 已經清理乾淨的 API 網址，沒有多餘的 Markdown 括號了
     url = f"[https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=](https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=){API_KEY}"
     try:
         res = requests.post(url, json={"contents": [{"parts": [{"text": prompt}]}]}, timeout=90)
@@ -101,7 +111,6 @@ async def generate_quiz(files: List[UploadFile] = File(...)):
         return {"status": "ok", "count": len(combined)}
     except Exception as e: 
         print(f"生成異常: {str(e)}")
-        # 這裡會安全地把錯誤原因傳給前端，不再隨便丟 500
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.delete("/admin/temp-clear")
@@ -156,10 +165,23 @@ async def publish(data: List[dict]):
 
 @app.get("/admin/records")
 async def get_recs():
-    conn = sqlite3.connect("quiz_data.db")
-    recs = conn.execute("SELECT emp_id, name, score, detail FROM records").fetchall()
-    conn.close()
-    return [{"emp_id": r[0], "name": r[1], "score": r[2], "detail": json.loads(r[3] if r[3] else "[]")} for r in recs]
+    try:
+        conn = sqlite3.connect("quiz_data.db")
+        recs = conn.execute("SELECT emp_id, name, score, detail FROM records").fetchall()
+        conn.close()
+        
+        result = []
+        for r in recs:
+            try:
+                # 🌟 防止如果資料有損毀，自動跳過解析錯誤
+                det = json.loads(r[3]) if r[3] else []
+            except:
+                det = []
+            result.append({"emp_id": r[0], "name": r[1], "score": r[2], "detail": det})
+        return result
+    except Exception as e:
+        print(f"讀取成績發生錯誤: {e}")
+        return []
 
 @app.delete("/admin/records/clear")
 async def clear_recs():
