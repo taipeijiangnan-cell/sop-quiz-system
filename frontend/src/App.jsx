@@ -1,85 +1,6 @@
-import React, { useState, useEffect } from 'react';
+// ... 前面 App 組件與考試邏輯維持原樣 ...
 
-const API_BASE = "https://sop-quiz-api.onrender.com"; 
-
-function App() {
-  const [isAdmin, setIsAdmin] = useState(window.location.pathname === '/admin');
-  const [view, setView] = useState('login'); 
-  const [user, setUser] = useState({ name: '', emp_id: '' });
-  const [questions, setQuestions] = useState([]);
-  const [answers, setAnswers] = useState({});
-  const [score, setScore] = useState(0);
-
-  const startQuiz = async () => {
-    if (!user.name || !user.emp_id) return alert("請填寫姓名與工號");
-    try {
-      const res = await fetch(`${API_BASE}/get-questions?emp_id=${user.emp_id}`);
-      if (res.status === 403) return alert("此工號已完成考核！");
-      if (!res.ok) return alert("題庫尚未發布，請洽店長");
-      const data = await res.json();
-      setQuestions(data);
-      setView('quiz');
-    } catch (e) { alert("系統連線失敗"); }
-  };
-
-  const submitQuiz = async () => {
-    let correctCount = 0;
-    const detail = questions.map(q => {
-      const isCorrect = answers[q.id] === q.ans;
-      if (isCorrect) correctCount++;
-      return { q: q.q, userAns: answers[q.id] || "未答", correctAns: q.ans, isCorrect };
-    });
-    const finalScore = Math.round((correctCount / questions.length) * 100);
-    setScore(finalScore);
-    try {
-      await fetch(`${API_BASE}/submit`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ...user, score: finalScore, detail: detail })
-      });
-      setView('result');
-    } catch (e) { alert("交卷失敗，請截圖成績畫面"); }
-  };
-
-  if (isAdmin) return <AdminPanel />;
-
-  return (
-    <div style={{ padding: '20px', maxWidth: '600px', margin: 'auto', fontFamily: 'sans-serif' }}>
-      {view === 'login' && (
-        <div style={{ textAlign: 'center', border: '2px solid #3498db', padding: '40px', borderRadius: '20px' }}>
-          <h2 style={{ color: '#2c3e50' }}>🏢 門市 SOP 考核系統</h2>
-          <input placeholder="您的姓名" onChange={e => setUser({...user, name: e.target.value})} style={inputStyle} /><br/>
-          <input placeholder="員工工號" onChange={e => setUser({...user, emp_id: e.target.value})} style={inputStyle} /><br/>
-          <button onClick={startQuiz} style={btnStyle}>開始隨機 20 題測驗</button>
-        </div>
-      )}
-      {view === 'quiz' && (
-        <div>
-          <h3>✍️ 測驗中 (共 20 題)</h3>
-          {questions.map((q, idx) => (
-            <div key={idx} style={qBoxStyle}>
-              <p><b>{idx + 1}. {q.q}</b></p>
-              {Object.entries(q.options).map(([key, val]) => (
-                <label key={key} style={{ display: 'block', margin: '8px 0', cursor: 'pointer' }}>
-                  <input type="radio" name={`q${q.id}`} onChange={() => setAnswers({...answers, [q.id]: key})} /> {key}. {val}
-                </label>
-              ))}
-            </div>
-          ))}
-          <button onClick={submitQuiz} style={{ ...btnStyle, width: '100%' }}>確認交卷</button>
-        </div>
-      )}
-      {view === 'result' && (
-        <div style={{ textAlign: 'center', marginTop: '50px' }}>
-          <h2 style={{ color: '#7f8c8d' }}>測驗完成！您的分數為：</h2>
-          <h1 style={{ fontSize: '80px', color: score >= 80 ? '#27ae60' : '#e74c3c' }}>{score}</h1>
-          <p style={{ fontSize: '20px' }}>{score >= 80 ? "✅ 恭喜及格！" : "❌ 未達 80 分及格標準"}</p>
-        </div>
-      )}
-    </div>
-  );
-}
-
+// --- 只更新 AdminPanel 內部的按鈕邏輯 ---
 function AdminPanel() {
   const [tempQs, setTempQs] = useState([]);
   const [finalQs, setFinalQs] = useState([]);
@@ -109,15 +30,23 @@ function AdminPanel() {
     try {
       const res = await fetch(`${API_BASE}/generate-quiz`, { method: 'POST', body: formData });
       if (res.ok) {
-        alert("✅ 50 題草稿生成完畢！請查看下方預覽區。");
-        setTimeout(fetchData, 2000); 
-      }
-    } catch (e) { alert("生成失敗"); }
+        alert("✅ 20 題已加入草稿！您可以再次上傳以累積題數。");
+        fetchData();
+      } else { alert("❌ 生成失敗，請確認檔案大小或 API。"); }
+    } catch (e) { alert("生成超時，但可能已在後端處理中，請稍後刷新。"); }
     setLoading(false);
   };
 
+  const clearTemp = async () => {
+    if (window.confirm("確定要清空目前的草稿嗎？")) {
+      await fetch(`${API_BASE}/admin/temp-clear`, { method: 'DELETE' });
+      fetchData();
+    }
+  };
+
   const publish = async () => {
-    if (!window.confirm("確定發布？這將成為夥伴目前的隨機題庫。")) return;
+    if (tempQs.length < 20) return alert("題庫至少需要 20 題才能發布！");
+    if (!window.confirm(`確定發布這 ${tempQs.length} 題？這將成為夥伴目前的隨機題庫。`)) return;
     await fetch(`${API_BASE}/admin/publish-questions`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -127,91 +56,7 @@ function AdminPanel() {
     fetchData();
   };
 
-  return (
-    <div style={{ padding: '30px', fontFamily: 'sans-serif', backgroundColor: '#f4f7f6', minHeight: '100vh' }}>
-      <h1 style={{ color: '#2c3e50', textAlign: 'center' }}>🛡️ 店長後台管理中心</h1>
-      
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '30px', marginTop: '30px' }}>
-        {/* 題庫區 */}
-        <div style={cardStyle}>
-          <h3>📚 題庫與出題</h3>
-          <label style={{ ...btnStyle, display: 'inline-block', backgroundColor: '#34495e' }}>
-            📁 上傳 SOP 製作題庫 (50題)
-            <input type="file" multiple hidden onChange={handleUpload} />
-          </label>
-          {loading && <p style={{ color: '#e67e22' }}>🚀 AI 正在閱讀並產題中，請稍候...</p>}
-          
-          <div style={{ marginTop: '20px', border: '1px solid #bdc3c7', borderRadius: '10px', padding: '15px', backgroundColor: '#fff' }}>
-            <h4 style={{ margin: '0 0 10px 0' }}>💡 目前線上題庫 ({finalQs.length} 題)</h4>
-            <div style={{ height: '200px', overflowY: 'auto', fontSize: '13px' }}>
-              {finalQs.map((q, i) => <div key={i} style={{ padding: '5px 0', borderBottom: '1px solid #f1f1f1' }}>{q.id}. {q.q}</div>)}
-              {finalQs.length === 0 && <p style={{ color: '#95a5a6' }}>尚未發布題目</p>}
-            </div>
-          </div>
-
-          {tempQs.length > 0 && (
-            <div style={{ marginTop: '20px', padding: '15px', backgroundColor: '#fff3cd', borderRadius: '10px' }}>
-              <h4>🆕 新生成的草稿預覽</h4>
-              <div style={{ height: '200px', overflowY: 'auto', backgroundColor: '#fff', padding: '10px', marginBottom: '10px', fontSize: '13px' }}>
-                {tempQs.map((q, i) => <div key={i}>{q.id}. {q.q} (答案:{q.ans})</div>)}
-              </div>
-              <button onClick={publish} style={{ ...btnStyle, backgroundColor: '#27ae60', width: '100%' }}>確認內容並發布</button>
-            </div>
-          )}
-        </div>
-
-        {/* 成績區 */}
-        <div style={cardStyle}>
-          <h3>📈 夥伴考核成績紀錄</h3>
-          <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-            <thead>
-              <tr style={{ backgroundColor: '#ecf0f1' }}>
-                <th style={thStyle}>姓名</th><th style={thStyle}>分數</th><th style={thStyle}>作答詳情</th>
-              </tr>
-            </thead>
-            <tbody>
-              {records.map(r => (
-                <tr key={r.emp_id} style={{ borderBottom: '1px solid #eee' }}>
-                  <td style={tdStyle}>{r.name}</td>
-                  <td style={{ ...tdStyle, color: r.score >= 80 ? '#27ae60' : '#e74c3c', fontWeight: 'bold' }}>{r.score}</td>
-                  <td style={tdStyle}><button onClick={() => setShowDetail(r)} style={miniBtnStyle}>查看</button></td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      </div>
-
-      {showDetail && (
-        <div style={modalOverlayStyle}>
-          <div style={modalStyle}>
-            <h3>夥伴 {showDetail.name} 的作答報告</h3>
-            <div style={{ maxHeight: '400px', overflowY: 'auto', textAlign: 'left' }}>
-              {showDetail.detail.map((d, i) => (
-                <div key={i} style={{ padding: '10px 0', borderBottom: '1px solid #eee' }}>
-                  <p style={{ margin: '0 0 5px 0' }}><b>Q: {d.q}</b></p>
-                  <p style={{ margin: 0, color: d.isCorrect ? '#27ae60' : '#e74c3c' }}>
-                    夥伴答: {d.userAns} | 正確答: {d.correctAns} {d.isCorrect ? '✅' : '❌'}
-                  </p>
-                </div>
-              ))}
-            </div>
-            <button onClick={() => setShowDetail(null)} style={{ ...btnStyle, marginTop: '20px' }}>關閉</button>
-          </div>
-        </div>
-      )}
-    </div>
-  );
+  // ... 此處下方的 HTML 介面與上一版相同，但在草稿區多加一個按鈕 ...
+  // 請在題庫管理區的生成按鈕下方加入：
+  // <button onClick={clearTemp} style={{backgroundColor:'#e74c3c', color:'white', border:'none', padding:'5px 10px', borderRadius:'5px', cursor:'pointer'}}>🗑️ 清空草稿重來</button>
 }
-
-const inputStyle = { padding: '12px', margin: '10px 0', width: '100%', borderRadius: '8px', border: '1px solid #bdc3c7', boxSizing: 'border-box' };
-const btnStyle = { padding: '12px 24px', borderRadius: '8px', border: 'none', backgroundColor: '#3498db', color: 'white', fontWeight: 'bold', cursor: 'pointer' };
-const qBoxStyle = { marginBottom: '25px', padding: '20px', backgroundColor: '#f9f9f9', borderRadius: '12px', borderLeft: '5px solid #3498db' };
-const cardStyle = { backgroundColor: 'white', padding: '25px', borderRadius: '20px', boxShadow: '0 4px 6px rgba(0,0,0,0.1)' };
-const thStyle = { padding: '12px', textAlign: 'left', borderBottom: '2px solid #ddd' };
-const tdStyle = { padding: '12px' };
-const miniBtnStyle = { padding: '5px 10px', borderRadius: '5px', border: '1px solid #3498db', color: '#3498db', backgroundColor: 'transparent', cursor: 'pointer' };
-const modalOverlayStyle = { position: 'fixed', top: 0, left: 0, width: '100%', height: '100%', backgroundColor: 'rgba(0,0,0,0.6)', display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 1000 };
-const modalStyle = { backgroundColor: 'white', padding: '30px', borderRadius: '20px', width: '90%', maxWidth: '600px', textAlign: 'center' };
-
-export default App;
