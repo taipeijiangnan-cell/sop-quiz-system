@@ -66,10 +66,9 @@ async def generate_quiz(files: List[UploadFile] = File(...)):
     範例：[ {{"q": "題目", "options": {{"A": "選項A", "B": "選項B", "C": "選項C", "D": "選項D"}}, "ans": "A"}} ]
     內容：{all_text[:5000]}"""
     
-    # 🌟 修正模型名稱：改為 Google 官方目前支援的 -latest 後綴版本
-    # 將網址切成兩段，防止編輯器雞婆幫忙加上 Markdown 超連結
+    # 🌟 終極穩定解法：改用所有 API Key 皆 100% 支援的 gemini-pro 模型
     host = "https://generativelanguage.googleapis.com"
-    path = "/v1beta/models/gemini-1.5-flash-latest:generateContent?key="
+    path = "/v1beta/models/gemini-pro:generateContent?key="
     url = host + path + API_KEY.strip()
     
     try:
