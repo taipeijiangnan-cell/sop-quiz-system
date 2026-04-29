@@ -62,12 +62,11 @@ async def generate_quiz(files: List[UploadFile] = File(...)):
     範例：[ {{"q": "題目", "options": {{"A": "選項A", "B": "選項B", "C": "選項C", "D": "選項D"}}, "ans": "A"}} ]
     內容：{all_text[:5000]}"""
     
-    # 🌟 終極防禦：用字串拼接的方式，徹底避開複製貼上時的 Markdown 自動變換問題
-   # 貼上這四行 (把網址切碎，徹底防止編輯器亂加括號)
-host_part1 = "https://generativelanguage"
-host_part2 = ".googleapis.com"
-path_part = "/v1beta/models/gemini-1.5-flash:generateContent?key="
-url = host_part1 + host_part2 + path_part + API_KEY
+    # 🌟 終極防禦：將網址切成三塊，徹底避開任何編輯器的「自動加上超連結」功能
+    host_part1 = "https://generativelanguage"
+    host_part2 = ".googleapis.com"
+    path_part = "/v1beta/models/gemini-1.5-flash:generateContent?key="
+    url = host_part1 + host_part2 + path_part + API_KEY
     
     try:
         res = requests.post(url, json={"contents": [{"parts": [{"text": prompt}]}]}, timeout=90)
