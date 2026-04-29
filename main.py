@@ -18,10 +18,8 @@ API_KEY = os.getenv("GEMINI_API_KEY")
 def init_db():
     conn = sqlite3.connect("quiz_data.db")
     cursor = conn.cursor()
-    
-    # 🌟 強制刪除舊版成績表，解決 500 錯誤 (重建包含 detail 的新表)
+    # 預防舊版本衝突，每次啟動確保資料表結構最新
     cursor.execute("DROP TABLE IF EXISTS records")
-    
     cursor.execute("CREATE TABLE IF NOT EXISTS temp_qs (id INTEGER PRIMARY KEY, data TEXT)")
     cursor.execute("CREATE TABLE IF NOT EXISTS final_qs (id INTEGER PRIMARY KEY, data TEXT)")
     cursor.execute("CREATE TABLE IF NOT EXISTS records (emp_id TEXT PRIMARY KEY, name TEXT, score INTEGER, detail TEXT)")
@@ -50,29 +48,60 @@ async def generate_quiz(files: List[UploadFile] = File(...)):
     for f in files: 
         all_text += f"\n\n[File: {f.filename}]\n{await extract_text(f)}"
     
-    # 一次生 20 題，避免網頁等待超時跳掉
-    prompt = f"針對內文設計「20題」繁體中文單選題。格式為 JSON 陣列，包含 q, options(A,B,C,D), ans(A/B/C/D)。不要Markdown。內容：{all_text[:5000]}"
+    # 強制 AI 使用最嚴格的 JSON 格式
+    prompt = f"""請針對內文設計「20題」繁體中文單選題。
+    必須嚴格回傳 JSON 陣列格式！不要加上 ```json 標籤，只要純陣列！
+    範例：[ {{"q": "題目", "options": {{"A": "選項A", "B": "選項B", "C": "選項C", "D": "選項D"}}, "ans": "A"}} ]
+    內容：{all_text[:5000]}"""
     
-    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={API_KEY}"
+    url = f"[https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=](https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=){API_KEY}"
     try:
         res = requests.post(url, json={"contents": [{"parts": [{"text": prompt}]}]}, timeout=90)
         if res.status_code == 200:
             raw = res.json()['candidates'][0]['content']['parts'][0]['text']
+            
+            # 暴力清理 Markdown
             match = re.search(r'\[.*\]', raw, re.DOTALL)
-            if match:
-                parsed = json.loads(match.group())
-                conn = sqlite3.connect("quiz_data.db")
-                # 讀取舊草稿並累加
-                old = conn.execute("SELECT data FROM temp_qs WHERE id=1").fetchone()
-                existing = json.loads(old[0]) if old else []
-                new_qs = [{"id": len(existing)+i+1, "q": x['q'], "options": x['options'], "ans": x['ans']} for i, x in enumerate(parsed[:20])]
-                combined = existing + new_qs
+            if not match: raise Exception("找不到合法的 JSON 陣列")
+            
+            parsed = json.loads(match.group())
+            
+            conn = sqlite3.connect("quiz_data.db")
+            old = conn.execute("SELECT data FROM temp_qs WHERE id=1").fetchone()
+            existing = json.loads(old[0]) if old else []
+            
+            new_qs = []
+            for x in parsed[:20]:
+                q_text = str(x.get('q', '無題目'))
+                ans_text = str(x.get('ans', 'A')).upper()
                 
-                conn.execute("INSERT OR REPLACE INTO temp_qs (id, data) VALUES (1, ?)", (json.dumps(combined),))
-                conn.commit(); conn.close()
-                return {"status": "ok", "count": len(combined)}
-    except Exception as e: print(f"生成異常: {e}")
-    raise HTTPException(status_code=500, detail="生成失敗")
+                # 🌟 終極防呆：不管 AI 給什麼格式的選項，都強制轉成 ABCD 字典
+                raw_opts = x.get('options', {})
+                opts = {"A": "A", "B": "B", "C": "C", "D": "D"}
+                if isinstance(raw_opts, dict):
+                    opts["A"] = str(raw_opts.get("A", raw_opts.get("a", "選項A")))
+                    opts["B"] = str(raw_opts.get("B", raw_opts.get("b", "選項B")))
+                    opts["C"] = str(raw_opts.get("C", raw_opts.get("c", "選項C")))
+                    opts["D"] = str(raw_opts.get("D", raw_opts.get("d", "選項D")))
+                elif isinstance(raw_opts, list) and len(raw_opts) >= 4:
+                    opts["A"], opts["B"], opts["C"], opts["D"] = [str(o) for o in raw_opts[:4]]
+                
+                new_qs.append({
+                    "id": len(existing) + len(new_qs) + 1,
+                    "q": q_text,
+                    "options": opts,
+                    "ans": ans_text
+                })
+            
+            combined = existing + new_qs
+            conn.execute("INSERT OR REPLACE INTO temp_qs (id, data) VALUES (1, ?)", (json.dumps(combined),))
+            conn.commit(); conn.close()
+            return {"status": "ok", "count": len(combined)}
+        else:
+            raise Exception("API 請求失敗")
+    except Exception as e: 
+        print(f"生成異常: {e}")
+        raise HTTPException(status_code=500, detail="生成失敗")
 
 @app.delete("/admin/temp-clear")
 async def clear_temp():
@@ -91,7 +120,6 @@ async def get_qs(emp_id: str):
     if not data: raise HTTPException(status_code=400, detail="題庫未就緒")
     
     all_qs = json.loads(data[0])
-    # 從大題庫中隨機抽 20 題給夥伴
     return random.sample(all_qs, min(20, len(all_qs)))
 
 @app.post("/submit")
@@ -120,7 +148,7 @@ async def get_temp():
 async def publish(data: List[dict]):
     conn = sqlite3.connect("quiz_data.db")
     conn.execute("DELETE FROM final_qs")
-    conn.execute("DELETE FROM temp_qs") # 發布後自動清空草稿區
+    conn.execute("DELETE FROM temp_qs")
     conn.execute("INSERT INTO final_qs (id, data) VALUES (1, ?)", (json.dumps(data),))
     conn.commit(); conn.close()
     return {"status": "ok"}
