@@ -13,16 +13,15 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# 抓取 API 金鑰
-API_KEY = os.getenv("GEMINI_API_KEY", "")
+# 抓取 API 金鑰 (自動清除可能的空白與隱形雙引號)
+raw_key = os.getenv("GEMINI_API_KEY", "")
+API_KEY = raw_key.strip().replace('"', '').replace("'", "")
 
 def init_db():
     conn = sqlite3.connect("quiz_data.db")
     cursor = conn.cursor()
     cursor.execute("CREATE TABLE IF NOT EXISTS temp_qs (id INTEGER PRIMARY KEY, data TEXT)")
     cursor.execute("CREATE TABLE IF NOT EXISTS final_qs (id INTEGER PRIMARY KEY, data TEXT)")
-    
-    # 建立包含 detail 欄位的新版資料表
     cursor.execute("CREATE TABLE IF NOT EXISTS records (emp_id TEXT PRIMARY KEY, name TEXT, score INTEGER, detail TEXT)")
     
     # 自動升級防護罩
@@ -53,9 +52,8 @@ async def extract_text(file: UploadFile):
 
 @app.post("/generate-quiz")
 async def generate_quiz(files: List[UploadFile] = File(...)):
-    # 🌟 防呆第一層：檢查金鑰是否存在
-    if not API_KEY or API_KEY.strip() == "":
-        raise HTTPException(status_code=500, detail="伺服器遺失 API 金鑰！請至 Render 的 Environment 檢查 GEMINI_API_KEY 是否填寫正確。")
+    if not API_KEY:
+        raise HTTPException(status_code=500, detail="伺服器遺失 API 金鑰！請至 Render 檢查 GEMINI_API_KEY 設定。")
 
     all_text = ""
     for f in files: 
@@ -66,28 +64,40 @@ async def generate_quiz(files: List[UploadFile] = File(...)):
     範例：[ {{"q": "題目", "options": {{"A": "選項A", "B": "選項B", "C": "選項C", "D": "選項D"}}, "ans": "A"}} ]
     內容：{all_text[:5000]}"""
     
-    # 🌟 終極穩定解法：改用所有 API Key 皆 100% 支援的 gemini-pro 模型
-    host = "https://generativelanguage.googleapis.com"
-    path = "/v1beta/models/gemini-pro:generateContent?key="
-    url = host + path + API_KEY.strip()
+    # 🌟 自動切換模型引擎 (Auto-Fallback)
+    models_to_test = ["gemini-1.5-flash", "gemini-1.0-pro"]
+    success = False
+    last_error = ""
+    data = None
     
+    for model_name in models_to_test:
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/{model_name}:generateContent?key={API_KEY}"
+        try:
+            res = requests.post(url, json={"contents": [{"parts": [{"text": prompt}]}]}, timeout=90)
+            if res.status_code == 200:
+                data = res.json()
+                success = True
+                print(f"✅ 成功使用模型: {model_name}")
+                break # 成功了！跳出測試迴圈
+            else:
+                last_error = res.json().get('error', {}).get('message', res.text)
+                print(f"❌ 模型 {model_name} 失敗: {last_error}")
+        except Exception as e:
+            last_error = str(e)
+            print(f"❌ 連線 {model_name} 發生異常: {last_error}")
+
+    if not success:
+        raise HTTPException(status_code=500, detail=f"Google API 拒絕了請求，最後錯誤原因: {last_error}")
+        
     try:
-        res = requests.post(url, json={"contents": [{"parts": [{"text": prompt}]}]}, timeout=90)
-        if res.status_code != 200:
-            # 🌟 防呆第三層：直接把 Google 拒絕的真實原因抓出來顯示給店長看
-            err_detail = res.json().get('error', {}).get('message', res.text)
-            print(f"API錯誤: {err_detail}")
-            raise Exception(f"Google API 錯誤 (代碼: {res.status_code}) - 詳細原因: {err_detail}")
-            
-        data = res.json()
         if "candidates" not in data or not data["candidates"]:
-            raise Exception("AI 沒有回傳任何題目，可能是內容觸發了安全阻擋機制。")
+            raise Exception("AI 沒有回傳任何內容，可能是觸發了安全阻擋。")
             
         raw = data['candidates'][0]['content']['parts'][0]['text']
         
         match = re.search(r'\[.*\]', raw, re.DOTALL)
         if not match: 
-            raise Exception("AI 回傳的格式嚴重錯亂，找不到合法的 JSON。請再試一次。")
+            raise Exception("AI 回傳的格式嚴重錯亂，找不到合法的 JSON 陣列。")
         
         parsed = json.loads(match.group())
         
@@ -118,8 +128,8 @@ async def generate_quiz(files: List[UploadFile] = File(...)):
         conn.close()
         return {"status": "ok", "count": len(combined)}
     except Exception as e: 
-        print(f"生成異常: {str(e)}")
-        raise HTTPException(status_code=500, detail=str(e))
+        print(f"資料處理異常: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"處理考卷資料時發生錯誤: {str(e)}")
 
 @app.delete("/admin/temp-clear")
 async def clear_temp():
