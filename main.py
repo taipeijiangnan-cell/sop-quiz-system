@@ -59,19 +59,16 @@ async def generate_quiz(files: List[UploadFile] = File(...)):
     {all_text}
     """
     
-    available_models = ["models/gemini-1.5-flash-latest", "models/gemini-1.5-flash", "models/gemini-pro"]
-    try:
-        list_url = f"https://generativelanguage.googleapis.com/v1beta/models?key={API_KEY}"
-        r = requests.get(list_url)
-        if r.status_code == 200:
-            available_models = [m["name"] for m in r.json().get("models", []) if "generateContent" in m["supportedGenerationMethods"]]
-    except Exception as e: 
-        print(f"獲取模型列表失敗: {e}")
+    # 🌟 終極解法：強制只使用 Google 目前官方認證最新、最穩定的 1.5 代模型
+    available_models = [
+        "models/gemini-1.5-flash",
+        "models/gemini-1.5-pro"
+    ]
 
     for model_path in available_models:
         url = f"https://generativelanguage.googleapis.com/v1beta/{model_path}:generateContent?key={API_KEY}"
         try:
-            print(f"正在嘗試使用模型: {model_path} ...")
+            print(f"👉 正在嘗試使用最新模型: {model_path} ...")
             res = requests.post(url, json={"contents": [{"parts": [{"text": prompt}]}]}, timeout=90)
             
             if res.status_code == 200:
@@ -121,13 +118,13 @@ async def generate_quiz(files: List[UploadFile] = File(...)):
                 print("✅ 考卷生成並儲存成功！")
                 return {"status": "ok"}
             else:
-                print(f"❌ API 回傳錯誤碼 {res.status_code}: {res.text}")
+                print(f"❌ 模型 {model_path} 拒絕請求 (代碼 {res.status_code}): {res.text}")
                 continue
         except Exception as e: 
-            print(f"❌ 程式處理時發生錯誤: {e}")
+            print(f"❌ 模型 {model_path} 處理時發生異常: {e}")
             continue
             
-    print("🚨 所有模型都嘗試失敗了！")
+    print("🚨 所有備用模型都嘗試失敗了！請確認 API KEY 是否可用。")
     raise HTTPException(status_code=500, detail="生成失敗")
 
 @app.get("/admin/temp-questions")
