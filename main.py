@@ -59,16 +59,39 @@ async def generate_quiz(files: List[UploadFile] = File(...)):
     {all_text}
     """
     
-    # 🌟 終極解法：強制只使用 Google 目前官方認證最新、最穩定的 1.5 代模型
-    available_models = [
-        "models/gemini-1.5-flash",
-        "models/gemini-1.5-pro"
-    ]
+    # 🌟 超級智慧探測器：先問 Google 這個 API Key 可以用哪些模型？
+    available_models = []
+    list_url = f"https://generativelanguage.googleapis.com/v1beta/models?key={API_KEY}"
+    try:
+        r = requests.get(list_url, timeout=10)
+        if r.status_code == 200:
+            print("🔍 成功向 Google 取得您的專屬模型清單：")
+            for m in r.json().get("models", []):
+                if "generateContent" in m.get("supportedGenerationMethods", []):
+                    name = m["name"]
+                    if "gemini" in name: 
+                        available_models.append(name)
+                        print(f"  ✔️ 找到可用模型: {name}")
+        else:
+            print(f"⚠️ 無法取得名單 (代碼 {r.status_code})，使用備用名單")
+    except Exception as e:
+        print(f"⚠️ 獲取名單發生錯誤: {e}，使用備用名單")
 
-    for model_path in available_models:
+    # 整理出優先順序，如果都抓不到就給保底名單
+    target_models = []
+    if available_models:
+        for pref in ["gemini-1.5-flash", "gemini-1.5-pro", "gemini-1.0-pro"]:
+            for am in available_models:
+                if pref in am and am not in target_models and "vision" not in am:
+                    target_models.append(am)
+        if not target_models: target_models = available_models 
+    else:
+        target_models = ["models/gemini-1.5-flash-latest", "models/gemini-1.0-pro-latest"]
+
+    for model_path in target_models:
         url = f"https://generativelanguage.googleapis.com/v1beta/{model_path}:generateContent?key={API_KEY}"
         try:
-            print(f"👉 正在嘗試使用最新模型: {model_path} ...")
+            print(f"🚀 正式發送請求給模型: {model_path} ...")
             res = requests.post(url, json={"contents": [{"parts": [{"text": prompt}]}]}, timeout=90)
             
             if res.status_code == 200:
@@ -115,7 +138,7 @@ async def generate_quiz(files: List[UploadFile] = File(...)):
                 conn.execute("DELETE FROM temp_qs")
                 conn.execute("INSERT INTO temp_qs (id, data) VALUES (1, ?)", (json.dumps(cleaned),))
                 conn.commit(); conn.close()
-                print("✅ 考卷生成並儲存成功！")
+                print(f"✅ {model_path} 考卷生成並儲存成功！")
                 return {"status": "ok"}
             else:
                 print(f"❌ 模型 {model_path} 拒絕請求 (代碼 {res.status_code}): {res.text}")
@@ -124,7 +147,7 @@ async def generate_quiz(files: List[UploadFile] = File(...)):
             print(f"❌ 模型 {model_path} 處理時發生異常: {e}")
             continue
             
-    print("🚨 所有備用模型都嘗試失敗了！請確認 API KEY 是否可用。")
+    print("🚨 所有備用模型都嘗試失敗了！請確認 API KEY 是否被停用。")
     raise HTTPException(status_code=500, detail="生成失敗")
 
 @app.get("/admin/temp-questions")
