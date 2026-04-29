@@ -20,7 +20,6 @@ def init_db():
     cursor = conn.cursor()
     cursor.execute("CREATE TABLE IF NOT EXISTS temp_qs (id INTEGER PRIMARY KEY, data TEXT)")
     cursor.execute("CREATE TABLE IF NOT EXISTS final_qs (id INTEGER PRIMARY KEY, data TEXT)")
-    # 🌟 修改：將 records 改為以工號 (emp_id) 為主鍵
     cursor.execute("CREATE TABLE IF NOT EXISTS records (emp_id TEXT PRIMARY KEY, name TEXT, score INTEGER)")
     conn.commit()
     conn.close()
@@ -38,7 +37,8 @@ async def extract_text(file: UploadFile):
             doc = docx.Document(io.BytesIO(content))
             for p in doc.paragraphs: text += p.text + "\n"
         else: text += content.decode("utf-8")
-    except: pass
+    except Exception as e: 
+        print(f"檔案解析錯誤: {e}")
     return text
 
 @app.post("/generate-quiz")
@@ -53,10 +53,8 @@ async def generate_quiz(files: List[UploadFile] = File(...)):
     【絕對強制規定】：你必須回傳合法的 JSON 陣列格式。
     不要加任何 Markdown 標記，不要加任何反引號。
     必須包含 "q" (題目), "options" (選項 A, B, C, D), "ans" (答案)。
-    
     範例格式：
     [ {{"q": "題目內容", "options": {{"A":"1","B":"2","C":"3","D":"4"}}, "ans": "A"}} ]
-    
     內文：
     {all_text}
     """
@@ -67,17 +65,19 @@ async def generate_quiz(files: List[UploadFile] = File(...)):
         r = requests.get(list_url)
         if r.status_code == 200:
             available_models = [m["name"] for m in r.json().get("models", []) if "generateContent" in m["supportedGenerationMethods"]]
-    except: pass
+    except Exception as e: 
+        print(f"獲取模型列表失敗: {e}")
 
     for model_path in available_models:
         url = f"https://generativelanguage.googleapis.com/v1beta/{model_path}:generateContent?key={API_KEY}"
         try:
+            print(f"正在嘗試使用模型: {model_path} ...")
             res = requests.post(url, json={"contents": [{"parts": [{"text": prompt}]}]}, timeout=90)
+            
             if res.status_code == 200:
                 raw = res.json()['candidates'][0]['content']['parts'][0]['text']
                 raw = raw.strip()
                 
-                # 處理反引號腰斬問題
                 json_marker = "`" * 3 + "json"
                 code_marker = "`" * 3
                 if raw.startswith(json_marker): raw = raw[7:]
@@ -94,7 +94,7 @@ async def generate_quiz(files: List[UploadFile] = File(...)):
                         if isinstance(v, list): parsed = v; break
                 
                 cleaned = []
-                for i, item in enumerate(parsed[:20]): # 強制截斷到20題
+                for i, item in enumerate(parsed[:20]):
                     q_text = item.get("q") or item.get("question") or "題目載入失敗"
                     opts = item.get("options") or {}
                     cleaned.append({
@@ -106,7 +106,6 @@ async def generate_quiz(files: List[UploadFile] = File(...)):
                         "ans": str(item.get("ans") or "A").upper()
                     })
                 
-                # 自動補齊不足的題目
                 while len(cleaned) < 20:
                     cleaned.append({
                         "id": len(cleaned) + 1, 
@@ -119,8 +118,16 @@ async def generate_quiz(files: List[UploadFile] = File(...)):
                 conn.execute("DELETE FROM temp_qs")
                 conn.execute("INSERT INTO temp_qs (id, data) VALUES (1, ?)", (json.dumps(cleaned),))
                 conn.commit(); conn.close()
+                print("✅ 考卷生成並儲存成功！")
                 return {"status": "ok"}
-        except: continue
+            else:
+                print(f"❌ API 回傳錯誤碼 {res.status_code}: {res.text}")
+                continue
+        except Exception as e: 
+            print(f"❌ 程式處理時發生錯誤: {e}")
+            continue
+            
+    print("🚨 所有模型都嘗試失敗了！")
     raise HTTPException(status_code=500, detail="生成失敗")
 
 @app.get("/admin/temp-questions")
@@ -141,7 +148,6 @@ async def publish(data: List[dict]):
 @app.get("/get-questions")
 async def get_qs(emp_id: str):
     conn = sqlite3.connect("quiz_data.db")
-    # 🌟 修改：檢查工號是否已考過
     if conn.execute("SELECT score FROM records WHERE emp_id=?", (emp_id,)).fetchone():
         conn.close(); raise HTTPException(status_code=403, detail="此工號已考過")
     data = conn.execute("SELECT data FROM final_qs WHERE id=1").fetchone()
@@ -158,7 +164,6 @@ async def submit(data: dict):
     raw = conn.execute("SELECT data FROM final_qs WHERE id=1").fetchone()
     final_qs = json.loads(raw[0])
     score = sum(5 for q in final_qs if str(ans.get(str(q["id"]))) == str(q["ans"]))
-    # 🌟 修改：儲存時包含工號
     conn.execute("INSERT OR REPLACE INTO records (emp_id, name, score) VALUES (?, ?, ?)", (emp_id, name, score))
     conn.commit(); conn.close()
     return {"score": score}
