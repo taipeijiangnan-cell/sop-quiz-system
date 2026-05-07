@@ -45,6 +45,9 @@ async def extract_text(file: UploadFile):
             for p in doc.paragraphs: text += p.text + "\n"
         else: text += content.decode("utf-8")
     except Exception as e: print(f"檔案解析錯誤: {e}")
+    
+    # 🌟 簡單過濾亂碼：移除重複過多的符號或無意義字元
+    text = re.sub(r'(月|日){3,}', '', text) 
     return text
 
 @app.post("/generate-quiz")
@@ -59,40 +62,29 @@ async def generate_quiz(files: List[UploadFile] = File(...)):
             all_text += f"\n\n{extracted}"
             
     if len(all_text.strip()) < 50:
-        raise HTTPException(status_code=400, detail="檔案內文太少或無法解析文字！請確認您的 PDF 是「可以反白複製文字」的檔案，而不是純圖片掃描檔。")
+        raise HTTPException(status_code=400, detail="無法讀取檔案文字！請確認 PDF 不是純圖片。")
     
-    # 🌟 全適應模式：讓 AI 自動判斷文件類型，出符合情境的題目
-    system_prompt = """你是一位極度專業的「連鎖門市考核出題總監」。
-    你的任務是先「分析文件屬性」，然後精準地將【文件內容】轉化為員工測驗題。
+    # 🌟 究極嚴格 System Prompt
+    system_prompt = """你是一個完全沒有記憶的出題機器人。
+    【絕對準則】
+    1. 你的世界「只有」我提供給你的【參考文件內容】。禁止使用你腦中任何關於「飲料店」、「行銷」、「SOP」的外部知識。
+    2. 禁止幻想！絕對不准發明不存在的節日（如：夏日清涼節）、不存在的產品或不存在的日期。
+    3. 每個題目和正確答案，都必須在文件中找到「一模一樣的對應字眼」。如果文件沒寫，你就絕對不能出那一題！
+    4. 禁止出抽象題（如：應進行哪些工作？）。只能考具體的數值、流程、話術或規定。
 
-    【🔴 嚴重違規行為（絕對禁止，觸犯視為不及格）】
-    1. 絕對禁止在開頭加上任何檔名、標題或說明！
-    2. 題目缺少主詞與情境：必須明確寫出完整情境與專有名詞（如：某活動名稱、某飲品名稱）。
-    3. 題目重複：考點必須【完全不重複】。
-    4. 禁用模糊代名詞與敷衍選項：禁止使用「某產品」、「該活動」、「上述」。選項必須是具體的做法或數字，禁止「未指定」、「以上皆是」、「以上皆非」。
-    5. 禁止常識題與過度抽象的行政題（例如：應進行哪些工作？）。所有的考題必須是「具體的操作、數值、日期或規範」。
+    【🔴 違規處罰】
+    如果你出了一題在文件中找不到依據的題目，或者使用了「某產品」等模糊字眼，該請求將被判定為徹底失敗。
 
-    【🟢 動態適應出題策略 (完美達成 20 題且不重複)】
-    請先分析這份文件的主要內容是「飲品配方」、「行銷活動」、「還是設備維護」，並根據其屬性出題：
-    - 若為【行銷活動/話術】：請考「活動起始日期」、「特定條件（滿多少錢/送什麼）」、「POS機按法/結帳流程」、「顧客回應話術」、「優惠是否可併用」。
-    - 若為【飲品配方/SOP】：請考「精準克數(g)/毫升(ml)」、「溫度/時間/火力」、「機器按鍵」、「保存期限(D+X)」。
-    
-    請盡可能從上述具體的面向，挖掘出 20 題高品質的題目。
-
-    【✅ 輸出格式規範】
-    請直接以 JSON 陣列格式回傳，陣列內包含 20 個題目物件。
-    格式範例：
+    【✅ 輸出格式】
+    直接以 JSON 陣列格式輸出。格式如下：
     [
-      {
-        "q": "根據「愚人節活動」規範，當顧客購買茶泡飯奶蓋時，門市夥伴應該主動說什麼話術？",
-        "options": {"A": "歡迎光臨", "B": "愚人節快樂", "C": "需要加購塑膠袋嗎", "D": "這杯不能調甜度喔"},
-        "ans": "B"
-      }
+      { "q": "來自文件的具體問題？", "options": {"A": "具體選項", "B": "具體選項", "C": "具體選項", "D": "具體選項"}, "ans": "A" }
     ]"""
 
-    user_prompt = f"請根據以下【文件內容】，設計「20 題」繁體中文單選題。\n\n【文件內容開始】\n{all_text[:4500]}\n【文件內容結束】\n\n【最後警告】：請直接從 [ {{ \"q\": ... 開始輸出，絕對不要加任何廢話！"
+    # 🌟 輸入與輸出的字數平衡平衡 (Input: 5000, Output: 3000)
+    user_prompt = f"請嚴格根據以下【參考文件內容】，設計 20 題高品質且具備文件依據的繁體中文單選題。不准幻想！\n\n【參考文件內容開始】\n{all_text[:5000]}\n【參考文件內容結束】\n\n請直接開始輸出 JSON 陣列，第一個字元必須是 [。"
     
-    url = "https://api.com/v1/chat/completions".replace("api.com", "api.groq.com/openai")
+    url = "https://api.groq.com/openai/v1/chat/completions"
     headers = {
         "Authorization": f"Bearer {GROQ_API_KEY}",
         "Content-Type": "application/json"
@@ -103,8 +95,8 @@ async def generate_quiz(files: List[UploadFile] = File(...)):
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": user_prompt}
         ],
-        "temperature": 0.3, 
-        "max_tokens": 3500 
+        "temperature": 0.05, # 🌟 降到極低，徹底消滅 AI 的創造力
+        "max_tokens": 3000, 
     }
     
     try:
@@ -112,33 +104,31 @@ async def generate_quiz(files: List[UploadFile] = File(...)):
         
         if res.status_code != 200:
             err_msg = res.json().get('error', {}).get('message', res.text)
-            if "Limit 12000" in err_msg or "rate_limit" in err_msg.lower() or "too large" in err_msg.lower():
-                raise Exception("您上傳的檔案文字量太大啦！超過了 API 的單次處理上限。請嘗試「刪除不需要的頁面」後再上傳！")
+            if "Limit 12000" in err_msg:
+                raise Exception("檔案文字量太大，超過 API 限制，請拆分檔案上傳。")
             raise Exception(f"Groq API 錯誤: {err_msg}")
             
         raw_content = res.json()['choices'][0]['message']['content']
         
+        # 🌟 磁鐵解析法：只吸取完整的題目
         parsed = []
         starts = [m.start() for m in re.finditer(r'\{\s*"(q|question|題目)"\s*:', raw_content)]
         
         for start in starts:
             depth = 0
             for i in range(start, len(raw_content)):
-                if raw_content[i] == '{':
-                    depth += 1
+                if raw_content[i] == '{': depth += 1
                 elif raw_content[i] == '}':
                     depth -= 1
                     if depth == 0:
                         try:
                             obj = json.loads(raw_content[start:i+1])
-                            if "options" in obj and "ans" in obj:
-                                parsed.append(obj)
-                        except:
-                            pass
+                            if "options" in obj and "ans" in obj: parsed.append(obj)
+                        except: pass
                         break
                         
         if not parsed:
-            raise Exception("AI 沒有成功生成任何完整的題目，請嘗試減少檔案內容或重試一次。")
+            raise Exception("AI 生成題目失敗，請重試一次。")
         
         conn = sqlite3.connect("quiz_data.db")
         old = conn.execute("SELECT data FROM temp_qs WHERE id=1").fetchone()
@@ -154,10 +144,9 @@ async def generate_quiz(files: List[UploadFile] = File(...)):
                 opts["C"] = str(raw_opts.get("C", raw_opts.get("c", "選項C")))
                 opts["D"] = str(raw_opts.get("D", raw_opts.get("d", "選項D")))
             
-            q_text = str(x.get('q', x.get('question', x.get('題目', '無題目'))))
             new_qs.append({
                 "id": len(existing) + len(new_qs) + 1,
-                "q": q_text,
+                "q": str(x.get('q', x.get('question', '無題目'))),
                 "options": opts,
                 "ans": str(x.get('ans', 'A')).upper()
             })
