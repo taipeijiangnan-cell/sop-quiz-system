@@ -14,7 +14,7 @@ function App() {
   // 🌟 動態更改網頁分頁標題 (前端員工視角)
   useEffect(() => {
     if (!isAdmin) {
-      document.title = "🦥 再睡五分鐘考核系統";
+      document.title = "再睡五分鐘考核系統";
     }
   }, [isAdmin]);
 
@@ -55,8 +55,8 @@ function App() {
     <div style={{ padding: '20px', maxWidth: '600px', margin: 'auto', fontFamily: 'sans-serif' }}>
       {view === 'login' && (
         <div style={{ textAlign: 'center', border: '2px solid #3498db', padding: '40px', borderRadius: '20px' }}>
-          {/* 🌟 修改為再睡五分鐘品牌名稱與 Logo */}
-          <h2 style={{ color: '#2c3e50' }}>🦥 再睡五分鐘考核系統</h2>
+          {/* 🌟 移除表情符號 */}
+          <h2 style={{ color: '#2c3e50' }}>再睡五分鐘考核系統</h2>
           <input placeholder="您的姓名" onChange={e => setUser({...user, name: e.target.value})} style={inputStyle} /><br/>
           <input placeholder="員工工號" onChange={e => setUser({...user, emp_id: e.target.value})} style={inputStyle} /><br/>
           <button onClick={startQuiz} style={btnStyle}>開始測驗 (隨機 20 題)</button>
@@ -111,7 +111,7 @@ function AdminPanel() {
 
   useEffect(() => { 
     // 🌟 動態更改網頁分頁標題 (後端店長視角)
-    document.title = "🛡️ 考核系統後端";
+    document.title = "考核系統後端";
     fetchData(); 
   }, []);
 
@@ -182,8 +182,8 @@ function AdminPanel() {
 
   return (
     <div style={{ padding: '30px', fontFamily: 'sans-serif', backgroundColor: '#f4f7f6', minHeight: '100vh' }}>
-      {/* 🌟 修改為後端標題名稱 */}
-      <h1 style={{ color: '#2c3e50', textAlign: 'center' }}>🛡️ 考核系統後端</h1>
+      {/* 🌟 移除表情符號 */}
+      <h1 style={{ color: '#2c3e50', textAlign: 'center' }}>考核系統後端</h1>
       
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '30px', marginTop: '30px' }}>
         <div style={cardStyle}>
