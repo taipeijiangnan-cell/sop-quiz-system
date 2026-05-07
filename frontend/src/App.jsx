@@ -9,7 +9,7 @@ function App() {
   const [questions, setQuestions] = useState([]);
   const [answers, setAnswers] = useState({});
   const [score, setScore] = useState(0);
-  const [timeLeft, setTimeLeft] = useState(1200); // 🌟 新增：計時器狀態 (預設 1200 秒 = 20 分鐘)
+  const [timeLeft, setTimeLeft] = useState(1200);
 
   useEffect(() => {
     document.title = isAdmin ? "考核系統後端" : "再睡五分鐘考核系統";
@@ -21,31 +21,28 @@ function App() {
     if (!chineseRegex.test(user.name)) return alert("姓名請輸入繁體中文！");
 
     try {
-      // 🌟 加入時間戳記，防止瀏覽器快取到舊的題庫
       const ts = new Date().getTime();
       const res = await fetch(`${API_BASE}/get-questions?emp_id=${user.emp_id}&t=${ts}`);
       if (res.status === 403) return alert("此工號已完成考核！");
       if (!res.ok) return alert("題庫尚未發布，請洽店長");
       const data = await res.json();
       setQuestions(data);
-      setTimeLeft(1200); // 🌟 每次開始測驗時，重置為 20 分鐘
+      setTimeLeft(1200); 
       setView('quiz');
-    } catch (e) { alert("系統連線失敗"); }
+    } catch (e) { alert("系統連線失敗，請檢查網路。"); }
   };
 
-  // 🌟 新增：倒數計時器邏輯
   useEffect(() => {
     if (view !== 'quiz') return;
     if (timeLeft <= 0) {
       alert("⏳ 考試時間到！系統將自動為您交卷。");
-      submitQuiz(); // 時間到自動觸發交卷
+      submitQuiz(); 
       return;
     }
     const timer = setTimeout(() => setTimeLeft(timeLeft - 1), 1000);
     return () => clearTimeout(timer);
   }, [view, timeLeft]);
 
-  // 🌟 新增：將秒數轉換為 分:秒 的小工具
   const formatTime = (seconds) => {
     const m = Math.floor(seconds / 60).toString().padStart(2, '0');
     const s = (seconds % 60).toString().padStart(2, '0');
@@ -61,12 +58,20 @@ function App() {
     });
     const finalScore = Math.round((correctCount / questions.length) * 100);
     setScore(finalScore);
-    await fetch(`${API_BASE}/submit`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ ...user, score: finalScore, detail: detail })
-    });
-    setView('result');
+    
+    // 🌟 強制跳轉防護網：不管伺服器有沒有活著，一定會讓夥伴看到分數！
+    try {
+      await fetch(`${API_BASE}/submit`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        // 🌟 修正傳送欄位名稱，確保與後端一致
+        body: JSON.stringify({ user_name: user.name, emp_id: user.emp_id, score: finalScore, detail: detail })
+      });
+    } catch (e) {
+      alert("⚠️ 網路不穩或伺服器休眠，成績未能上傳成功！\n但您仍可查看本次測驗分數，請截圖結果給店長紀錄。");
+    } finally {
+      setView('result'); // 絕對會跳轉到分數畫面
+    }
   };
 
   if (isAdmin) return <AdminPanel />;
@@ -83,7 +88,6 @@ function App() {
       )}
       {view === 'quiz' && (
         <div>
-          {/* 🌟 新增：置頂浮動的計時器介面 */}
           <div style={{ position: 'sticky', top: 0, backgroundColor: '#fff', padding: '15px 0', borderBottom: '2px solid #3498db', zIndex: 100, display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
             <h3 style={{ margin: 0 }}>✍️ 測驗中 (共 {questions.length} 題)</h3>
             <h3 style={{ margin: 0, color: timeLeft <= 60 ? '#e74c3c' : '#27ae60' }}>
@@ -106,8 +110,10 @@ function App() {
       )}
       {view === 'result' && (
         <div style={{ textAlign: 'center', marginTop: '50px' }}>
-          <h1>您的分數：{score}</h1>
-          <button onClick={() => window.location.reload()} style={btnStyle}>回到首頁</button>
+          <h2 style={{ color: '#7f8c8d' }}>測驗完成！您的分數為：</h2>
+          <h1 style={{ fontSize: '80px', color: score >= 80 ? '#27ae60' : '#e74c3c' }}>{score}</h1>
+          <p style={{ fontSize: '20px' }}>{score >= 80 ? "✅ 恭喜及格！" : "❌ 未達 80 分及格標準"}</p>
+          <button onClick={() => window.location.reload()} style={{ ...btnStyle, marginTop: '20px' }}>回到首頁</button>
         </div>
       )}
     </div>
@@ -123,7 +129,6 @@ function AdminPanel() {
 
   const fetchData = async () => {
     try {
-      // 🌟 破除快取魔法：加上 t 參數，強迫瀏覽器每次重整都去後端抓最新的資料庫狀態
       const ts = new Date().getTime();
       const [tRes, fRes, rRes] = await Promise.all([
         fetch(`${API_BASE}/admin/temp-questions?t=${ts}`),
@@ -138,6 +143,14 @@ function AdminPanel() {
 
   useEffect(() => { fetchData(); }, []);
 
+  // 🌟 自動跳轉小工具
+  const scrollToDraft = () => {
+    setTimeout(() => {
+      const draftArea = document.getElementById("draft-section");
+      if(draftArea) draftArea.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }, 500);
+  };
+
   const handleUpload = async (e) => {
     setLoading(true);
     const formData = new FormData();
@@ -145,8 +158,9 @@ function AdminPanel() {
     try {
       const res = await fetch(`${API_BASE}/generate-quiz`, { method: 'POST', body: formData });
       if (res.ok) {
-        alert("✅ 題目已加入草稿！請記得滑到最下面按「正式發布」！");
+        alert("✅ 題目已成功加入草稿！畫面將為您移動至下方檢查。");
         fetchData();
+        scrollToDraft(); // 🌟 呼叫自動向下跳轉
       } else {
         alert("❌ 生成失敗，可能是檔案格式不符，請再試一次。");
       }
@@ -159,6 +173,7 @@ function AdminPanel() {
     const newId = tempQs.length > 0 ? Math.max(...tempQs.map(q => q.id)) + 1 : 1;
     const blank = { id: newId, q: "請輸入題目內容", options: { A: "", B: "", C: "", D: "" }, ans: "A" };
     setTempQs([...tempQs, blank]);
+    scrollToDraft(); // 🌟 新增題目時也自動向下跳轉
   };
 
   const saveTemp = async () => {
@@ -211,7 +226,8 @@ function AdminPanel() {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(newDraft)
         });
-        alert(`✅ 成功匯入 ${formattedData.length} 題並儲存至草稿！\n⚠️ 請記得按右下角的「🚀 正式發布」才會變為線上題庫喔！`);
+        alert(`✅ 成功匯入 ${formattedData.length} 題並儲存至草稿！\n畫面將為您移動至下方檢查。`);
+        scrollToDraft(); // 🌟 匯入成功時也自動向下跳轉
       } catch (err) {
         alert("❌ 匯入失敗：檔案不是正確的題庫格式 (JSON)。");
       }
@@ -231,7 +247,7 @@ function AdminPanel() {
       body: JSON.stringify(tempQs)
     });
     alert("🚀 發布成功！夥伴現在可以使用新題庫測驗了。");
-    fetchData(); // 發布後立即重抓確保畫面更新
+    fetchData(); 
   };
 
   const clearTemp = async () => {
@@ -288,53 +304,56 @@ function AdminPanel() {
             </div>
           </div>
 
-          {tempQs.length > 0 && (
-            <div style={{ marginTop: '20px', padding: '15px', backgroundColor: '#fff3cd', borderRadius: '10px' }}>
-              <h4 style={{ margin: '0 0 10px 0' }}>🆕 準備發布的草稿 ({tempQs.length} 題) - <span style={{color:'red'}}>可點擊下方文字修改</span></h4>
-              
-              <div style={{ height: '400px', overflowY: 'auto', backgroundColor: '#fff', padding: '15px', marginBottom: '10px' }}>
-                {tempQs.map((q) => (
-                  <div key={q.id} style={{ borderBottom: '2px solid #ddd', paddingBottom: '15px', marginBottom: '15px' }}>
-                    <div style={{ fontWeight: 'bold', marginBottom: '5px' }}>第 {q.id} 題：</div>
-                    <textarea 
-                      value={q.q} 
-                      onChange={(e) => updateDraft(q.id, 'q', e.target.value)} 
-                      style={{ width: '100%', padding: '8px', marginBottom: '10px', borderRadius: '5px', border: '1px solid #ccc', boxSizing: 'border-box' }}
-                    />
-                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
-                      {['A', 'B', 'C', 'D'].map(opt => (
-                        <div key={opt} style={{ display: 'flex', alignItems: 'center' }}>
-                          <span style={{ marginRight: '5px' }}>{opt}.</span>
-                          <input 
-                            value={q.options[opt] || ""} 
-                            onChange={(e) => updateOption(q.id, opt, e.target.value)} 
-                            style={{ flex: 1, padding: '6px', borderRadius: '4px', border: '1px solid #ccc' }}
-                          />
-                        </div>
-                      ))}
+          {/* 🌟 加入 id="draft-section" 讓系統知道跳轉要捲動到哪裡 */}
+          <div id="draft-section">
+            {tempQs.length > 0 && (
+              <div style={{ marginTop: '20px', padding: '15px', backgroundColor: '#fff3cd', borderRadius: '10px' }}>
+                <h4 style={{ margin: '0 0 10px 0' }}>🆕 準備發布的草稿 ({tempQs.length} 題) - <span style={{color:'red'}}>可點擊下方文字修改</span></h4>
+                
+                <div style={{ height: '400px', overflowY: 'auto', backgroundColor: '#fff', padding: '15px', marginBottom: '10px' }}>
+                  {tempQs.map((q) => (
+                    <div key={q.id} style={{ borderBottom: '2px solid #ddd', paddingBottom: '15px', marginBottom: '15px' }}>
+                      <div style={{ fontWeight: 'bold', marginBottom: '5px' }}>第 {q.id} 題：</div>
+                      <textarea 
+                        value={q.q} 
+                        onChange={(e) => updateDraft(q.id, 'q', e.target.value)} 
+                        style={{ width: '100%', padding: '8px', marginBottom: '10px', borderRadius: '5px', border: '1px solid #ccc', boxSizing: 'border-box' }}
+                      />
+                      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
+                        {['A', 'B', 'C', 'D'].map(opt => (
+                          <div key={opt} style={{ display: 'flex', alignItems: 'center' }}>
+                            <span style={{ marginRight: '5px' }}>{opt}.</span>
+                            <input 
+                              value={q.options[opt] || ""} 
+                              onChange={(e) => updateOption(q.id, opt, e.target.value)} 
+                              style={{ flex: 1, padding: '6px', borderRadius: '4px', border: '1px solid #ccc' }}
+                            />
+                          </div>
+                        ))}
+                      </div>
+                      <div style={{ marginTop: '10px', fontWeight: 'bold', color: '#27ae60' }}>
+                        正確答案：
+                        <select 
+                          value={q.ans} 
+                          onChange={(e) => updateDraft(q.id, 'ans', e.target.value)}
+                          style={{ marginLeft: '10px', padding: '5px', borderRadius: '4px' }}
+                        >
+                          <option value="A">A</option>
+                          <option value="B">B</option>
+                          <option value="C">C</option>
+                          <option value="D">D</option>
+                        </select>
+                      </div>
                     </div>
-                    <div style={{ marginTop: '10px', fontWeight: 'bold', color: '#27ae60' }}>
-                      正確答案：
-                      <select 
-                        value={q.ans} 
-                        onChange={(e) => updateDraft(q.id, 'ans', e.target.value)}
-                        style={{ marginLeft: '10px', padding: '5px', borderRadius: '4px' }}
-                      >
-                        <option value="A">A</option>
-                        <option value="B">B</option>
-                        <option value="C">C</option>
-                        <option value="D">D</option>
-                      </select>
-                    </div>
-                  </div>
-                ))}
+                  ))}
+                </div>
+                <div style={{ display: 'flex', gap: '10px' }}>
+                  <button onClick={saveTemp} style={{ ...btnStyle, backgroundColor: '#2980b9', flex: 1, margin: 0 }}>💾 儲存草稿</button>
+                  <button onClick={publish} style={{ ...btnStyle, backgroundColor: '#27ae60', flex: 1, margin: 0 }}>🚀 正式發布 (推送到線上)</button>
+                </div>
               </div>
-              <div style={{ display: 'flex', gap: '10px' }}>
-                <button onClick={saveTemp} style={{ ...btnStyle, backgroundColor: '#2980b9', flex: 1, margin: 0 }}>💾 儲存草稿</button>
-                <button onClick={publish} style={{ ...btnStyle, backgroundColor: '#27ae60', flex: 1, margin: 0 }}>🚀 正式發布 (推送到線上)</button>
-              </div>
-            </div>
-          )}
+            )}
+          </div>
         </div>
 
         <div style={cardStyle}>
