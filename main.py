@@ -21,13 +21,6 @@ def init_db():
     cursor.execute("CREATE TABLE IF NOT EXISTS temp_qs (id INTEGER PRIMARY KEY, data TEXT)")
     cursor.execute("CREATE TABLE IF NOT EXISTS final_qs (id INTEGER PRIMARY KEY, data TEXT)")
     cursor.execute("CREATE TABLE IF NOT EXISTS records (emp_id TEXT PRIMARY KEY, name TEXT, score INTEGER, detail TEXT)")
-    
-    try:
-        cursor.execute("SELECT detail FROM records LIMIT 1")
-    except sqlite3.OperationalError:
-        cursor.execute("DROP TABLE IF EXISTS records")
-        cursor.execute("CREATE TABLE IF NOT EXISTS records (emp_id TEXT PRIMARY KEY, name TEXT, score INTEGER, detail TEXT)")
-        
     conn.commit()
     conn.close()
 
@@ -39,80 +32,45 @@ async def extract_text(file: UploadFile):
     try:
         if file.filename.lower().endswith(".pdf"):
             reader = pypdf.PdfReader(io.BytesIO(content))
-            for page in reader.pages: 
-                # 🌟 只抓取有意義的文字
-                t = page.extract_text() or ""
-                text += t + "\n"
+            for page in reader.pages: text += (page.extract_text() or "") + "\n"
         elif file.filename.lower().endswith(".docx"):
             doc = docx.Document(io.BytesIO(content))
             for p in doc.paragraphs: text += p.text + "\n"
         else: text += content.decode("utf-8")
     except Exception as e: print(f"檔案解析錯誤: {e}")
-    
-    # 🌟 強力清洗亂碼：移除重複字、頁碼標籤與怪符號
     text = re.sub(r'[\r\t]+', ' ', text)
-    text = re.sub(r'(.)\1{4,}', '', text) # 移除連續超過 4 個重複的字(如月月月月)
-    text = re.sub(r'\n\s*\n+', '\n', text) # 移除過多換行
+    text = re.sub(r'(.)\1{4,}', '', text)
+    text = re.sub(r'\n\s*\n+', '\n', text)
     return text
 
 @app.post("/generate-quiz")
 async def generate_quiz(files: List[UploadFile] = File(...)):
-    if not GROQ_API_KEY:
-        raise HTTPException(status_code=500, detail="遺失 GROQ_API_KEY！")
-
+    if not GROQ_API_KEY: raise HTTPException(status_code=500, detail="遺失 GROQ_API_KEY")
     all_text = ""
     for f in files: 
         extracted = await extract_text(f)
-        if extracted.strip():
-            all_text += extracted
+        if extracted.strip(): all_text += extracted
             
-    if len(all_text.strip()) < 30:
-        raise HTTPException(status_code=400, detail="無法讀取檔案文字！請確認 PDF 不是純圖片掃描檔。")
+    if len(all_text.strip()) < 30: raise HTTPException(status_code=400, detail="無法讀取文字")
     
-    # 🌟 究極嚴格 System Prompt：徹底封印 AI 的外部幻想
-    system_prompt = """你是一個完全沒有記憶的「再睡5分鐘」門市出題機器人。
-    【絕對準則】
-    1. 你的世界只有我提供的【文件內容】。禁止使用任何外部知識或聯想。
-    2. 禁止幻想！絕對不准發明不存在的節日（如：夏日清涼節）、不存在的日期。
-    3. 每個題目和選項都必須在文件中找到「精準對應的原始字句」。
-    4. 所有的選項必須具體，禁止使用「以上皆是」、「未指定」或模糊敘述。
-    5. 必須嚴格以 JSON 陣列格式輸出。
+    system_prompt = """你是一個完全沒有記憶的出題機器人。只准根據提供的內容出題，禁止幻想不存在的節日或產品。
+    直接以 JSON 陣列格式輸出。"""
 
-    【✅ 輸出格式】
-    [
-      { "q": "來自文件的具體問題？", "options": {"A": "具體選項", "B": "具體選項", "C": "具體選項", "D": "具體選項"}, "ans": "A" }
-    ]"""
-
-    # 🌟 嚴格控制輸入在 3000 字以內，確保總量不超過 12000 TPM
-    user_prompt = f"請根據以下【文件內容】，設計 20 題繁體中文單選題。不准幻想！\n\n【文件內容】\n{all_text[:3000]}\n\n請直接輸出 JSON 陣列，第一個字元必須是 [。"
+    user_prompt = f"請根據以下內容設計 20 題繁體中文單選題：\n\n{all_text[:4500]}\n\n直接輸出 [ {{...}} ] 格式。"
     
     url = "https://api.groq.com/openai/v1/chat/completions"
-    headers = {"Authorization": f"Bearer {GROQ_API_KEY}", "Content-Type": "application/json"}
     payload = {
         "model": "llama-3.3-70b-versatile",
-        "messages": [
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": user_prompt}
-        ],
-        "temperature": 0.0, # 🌟 絕對零度，消滅創造力
-        "max_tokens": 2500, # 🌟 控制輸出長度
+        "messages": [{"role": "system", "content": system_prompt}, {"role": "user", "content": user_prompt}],
+        "temperature": 0.0,
+        "max_tokens": 3500
     }
     
     try:
-        res = requests.post(url, headers=headers, json=payload, timeout=120)
-        
-        if res.status_code != 200:
-            err_msg = res.json().get('error', {}).get('message', res.text)
-            if "Limit 12000" in err_msg:
-                raise Exception("檔案文字量過大，觸發 API 限制。請嘗試分兩次上傳不同頁面。")
-            raise Exception(f"Groq 錯誤: {err_msg}")
-            
+        res = requests.post(url, headers={"Authorization": f"Bearer {GROQ_API_KEY}"}, json=payload, timeout=120)
         raw_content = res.json()['choices'][0]['message']['content']
-        
-        # 🌟 鋼鐵解析法
         parsed = []
         starts = [m.start() for m in re.finditer(r'\{\s*"(q|question|題目)"\s*:', raw_content)]
-        
         for start in starts:
             depth = 0
             for i in range(start, len(raw_content)):
@@ -125,43 +83,44 @@ async def generate_quiz(files: List[UploadFile] = File(...)):
                             if "options" in obj and "ans" in obj: parsed.append(obj)
                         except: pass
                         break
-                        
-        if not parsed:
-            raise Exception("AI 生成題目失敗，請確認檔案內容或稍後再試。")
         
         conn = sqlite3.connect("quiz_data.db")
         old = conn.execute("SELECT data FROM temp_qs WHERE id=1").fetchone()
         existing = json.loads(old[0]) if old else []
-        
-        new_qs = []
-        for x in parsed[:20]:
-            opts = {"A": "A", "B": "B", "C": "C", "D": "D"}
-            raw_opts = x.get('options', {})
-            if isinstance(raw_opts, dict):
-                opts["A"] = str(raw_opts.get("A", raw_opts.get("a", "選項A")))
-                opts["B"] = str(raw_opts.get("B", raw_opts.get("b", "選項B")))
-                opts["C"] = str(raw_opts.get("C", raw_opts.get("c", "選項C")))
-                opts["D"] = str(raw_opts.get("D", raw_opts.get("d", "選項D")))
-            
-            q_text = str(x.get('q', x.get('question', '無題目')))
-            new_qs.append({
-                "id": len(existing) + len(new_qs) + 1,
-                "q": q_text,
-                "options": opts,
-                "ans": str(x.get('ans', 'A')).upper()
-            })
-        
+        new_qs = [{"id": len(existing)+i+1, "q": x.get('q', x.get('question','')), "options": x.get('options',{}), "ans": str(x.get('ans','A')).upper()} for i, x in enumerate(parsed[:20])]
         combined = existing + new_qs
         conn.execute("INSERT OR REPLACE INTO temp_qs (id, data) VALUES (1, ?)", (json.dumps(combined),))
         conn.commit(); conn.close()
         return {"status": "ok", "count": len(combined)}
-    except Exception as e: 
-        raise HTTPException(status_code=500, detail=str(e))
+    except Exception as e: raise HTTPException(status_code=500, detail=str(e))
+
+# 🌟 新增：手動儲存草稿接口
+@app.post("/admin/save-temp")
+async def save_temp(data: List[dict]):
+    conn = sqlite3.connect("quiz_data.db")
+    conn.execute("INSERT OR REPLACE INTO temp_qs (id, data) VALUES (1, ?)", (json.dumps(data),))
+    conn.commit(); conn.close()
+    return {"status": "ok"}
+
+@app.get("/admin/temp-questions")
+async def get_temp():
+    conn = sqlite3.connect("quiz_data.db")
+    data = conn.execute("SELECT data FROM temp_qs WHERE id=1").fetchone()
+    conn.close()
+    return json.loads(data[0]) if data else []
 
 @app.delete("/admin/temp-clear")
 async def clear_temp():
     conn = sqlite3.connect("quiz_data.db")
     conn.execute("DELETE FROM temp_qs")
+    conn.commit(); conn.close()
+    return {"status": "ok"}
+
+@app.post("/admin/publish-questions")
+async def publish(data: List[dict]):
+    conn = sqlite3.connect("quiz_data.db")
+    conn.execute("DELETE FROM final_qs")
+    conn.execute("INSERT INTO final_qs (id, data) VALUES (1, ?)", (json.dumps(data),))
     conn.commit(); conn.close()
     return {"status": "ok"}
 
@@ -178,9 +137,8 @@ async def get_qs(emp_id: str):
 
 @app.post("/submit")
 async def submit(data: dict):
-    name, emp_id, score, detail = data.get("user_name"), data.get("emp_id"), data.get("score"), data.get("detail")
     conn = sqlite3.connect("quiz_data.db")
-    conn.execute("INSERT OR REPLACE INTO records (emp_id, name, score, detail) VALUES (?, ?, ?, ?)", (emp_id, name, score, json.dumps(detail)))
+    conn.execute("INSERT OR REPLACE INTO records (emp_id, name, score, detail) VALUES (?, ?, ?, ?)", (data['emp_id'], data['name'], data['score'], json.dumps(data['detail'])))
     conn.commit(); conn.close()
     return {"status": "ok"}
 
@@ -191,35 +149,12 @@ async def get_final():
     conn.close()
     return json.loads(data[0]) if data else []
 
-@app.get("/admin/temp-questions")
-async def get_temp():
-    conn = sqlite3.connect("quiz_data.db")
-    data = conn.execute("SELECT data FROM temp_qs WHERE id=1").fetchone()
-    conn.close()
-    return json.loads(data[0]) if data else []
-
-@app.post("/admin/publish-questions")
-async def publish(data: List[dict]):
-    conn = sqlite3.connect("quiz_data.db")
-    conn.execute("DELETE FROM final_qs")
-    conn.execute("DELETE FROM temp_qs")
-    conn.execute("INSERT INTO final_qs (id, data) VALUES (1, ?)", (json.dumps(data),))
-    conn.commit(); conn.close()
-    return {"status": "ok"}
-
 @app.get("/admin/records")
 async def get_recs():
-    try:
-        conn = sqlite3.connect("quiz_data.db")
-        recs = conn.execute("SELECT emp_id, name, score, detail FROM records").fetchall()
-        conn.close()
-        result = []
-        for r in recs:
-            try: det = json.loads(r[3]) if r[3] else []
-            except: det = []
-            result.append({"emp_id": r[0], "name": r[1], "score": r[2], "detail": det})
-        return result
-    except: return []
+    conn = sqlite3.connect("quiz_data.db")
+    recs = conn.execute("SELECT emp_id, name, score, detail FROM records").fetchall()
+    conn.close()
+    return [{"emp_id": r[0], "name": r[1], "score": r[2], "detail": json.loads(r[3])} for r in recs]
 
 @app.delete("/admin/records/clear")
 async def clear_recs():
