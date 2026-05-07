@@ -13,9 +13,8 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# 抓取 API 金鑰並清空隱形空白
-raw_key = os.getenv("GEMINI_API_KEY", "")
-API_KEY = raw_key.strip().replace('"', '').replace("'", "")
+# 🌟 改為抓取 Groq 金鑰
+GROQ_API_KEY = os.getenv("GROQ_API_KEY", "").strip()
 
 def init_db():
     conn = sqlite3.connect("quiz_data.db")
@@ -51,60 +50,45 @@ async def extract_text(file: UploadFile):
 
 @app.post("/generate-quiz")
 async def generate_quiz(files: List[UploadFile] = File(...)):
-    if not API_KEY:
-        raise HTTPException(status_code=500, detail="伺服器遺失 API 金鑰！請至 Render 檢查 GEMINI_API_KEY 設定。")
+    if not GROQ_API_KEY:
+        raise HTTPException(status_code=500, detail="遺失 GROQ_API_KEY！請檢查 Render 環境變數。")
 
     all_text = ""
     for f in files: 
         all_text += f"\n\n[File: {f.filename}]\n{await extract_text(f)}"
     
-    prompt = f"""請針對內文設計「20題」繁體中文單選題。
-    必須嚴格回傳 JSON 陣列格式！不要加上任何 markdown 標籤，只要純陣列！
-    範例：[ {{"q": "題目", "options": {{"A": "選項A", "B": "選項B", "C": "選項C", "D": "選項D"}}, "ans": "A"}} ]
+    prompt = f"""你是一個門市培訓專家。請針對內文設計「20題」繁體中文單選題。
+    必須嚴格回傳 JSON 陣列格式！不要加上任何說明文字或 Markdown 標籤，只要純陣列！
+    格式範例：[ {{"q": "題目", "options": {{"A": "選項A", "B": "選項B", "C": "選項C", "D": "選項D"}}, "ans": "A"}} ]
     內容：{all_text[:5000]}"""
     
-    # 🌟 2026年最新引擎：Google 淘汰了舊版，這裡我們使用官方最新的 2.5 和 2.0 世代模型
-    models_to_test = [
-        "gemini-2.5-flash",
-        "gemini-2.0-flash"
-    ]
+    # 🌟 使用 Groq API 終端點
+    url = "https://api.groq.com/openai/v1/chat/completions"
+    headers = {
+        "Authorization": f"Bearer {GROQ_API_KEY}",
+        "Content-Type": "application/json"
+    }
+    payload = {
+        "model": "llama-3.1-8b-instant", # 🌟 使用 Groq 速度最快的 Llama 3.1 模型
+        "messages": [{"role": "user", "content": prompt}],
+        "temperature": 0.5
+    }
     
-    success = False
-    last_err_detail = ""
-    data = None
-    
-    for model in models_to_test:
-        url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={API_KEY}"
-        try:
-            res = requests.post(url, json={"contents": [{"parts": [{"text": prompt}]}]}, timeout=90)
-            if res.status_code == 200:
-                data = res.json()
-                success = True
-                print(f"✅ 成功使用模型: {model}")
-                break
-            else:
-                last_err_detail = res.json().get('error', {}).get('message', res.text)
-                print(f"❌ 模型 {model} 失敗: {last_err_detail}")
-        except Exception as e:
-            last_err_detail = str(e)
-            print(f"❌ 連線失敗: {last_err_detail}")
-
-    if not success:
-        safe_key = API_KEY[:6] + "..." if len(API_KEY) > 6 else "無效金鑰"
-        raise HTTPException(
-            status_code=500, 
-            detail=f"Google 拒絕了新版模型！金鑰前綴:「{safe_key}」。錯誤原因: {last_err_detail}"
-        )
-
     try:
-        if "candidates" not in data or not data["candidates"]:
-            raise Exception("AI 沒有回傳任何內容，可能是觸發了安全阻擋。")
+        res = requests.post(url, headers=headers, json=payload, timeout=60)
+        if res.status_code != 200:
+            raise Exception(f"Groq API 錯誤: {res.text}")
             
-        raw = data['candidates'][0]['content']['parts'][0]['text']
-        match = re.search(r'\[.*\]', raw, re.DOTALL)
-        if not match: raise Exception("AI 回傳的格式嚴重錯亂，請再試一次。")
+        # 抓取 AI 回傳的文字內容
+        raw_content = res.json()['choices'][0]['message']['content']
+        
+        # 清理 JSON
+        match = re.search(r'\[.*\]', raw_content, re.DOTALL)
+        if not match: 
+            raise Exception("AI 回傳格式不符合 JSON 陣列。")
         
         parsed = json.loads(match.group())
+        
         conn = sqlite3.connect("quiz_data.db")
         old = conn.execute("SELECT data FROM temp_qs WHERE id=1").fetchone()
         existing = json.loads(old[0]) if old else []
@@ -131,6 +115,7 @@ async def generate_quiz(files: List[UploadFile] = File(...)):
         conn.commit(); conn.close()
         return {"status": "ok", "count": len(combined)}
     except Exception as e: 
+        print(f"Groq 處理異常: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.delete("/admin/temp-clear")
@@ -190,14 +175,11 @@ async def get_recs():
         conn.close()
         result = []
         for r in recs:
-            try:
-                det = json.loads(r[3]) if r[3] else []
-            except:
-                det = []
+            try: det = json.loads(r[3]) if r[3] else []
+            except: det = []
             result.append({"emp_id": r[0], "name": r[1], "score": r[2], "detail": det})
         return result
-    except Exception as e:
-        return []
+    except: return []
 
 @app.delete("/admin/records/clear")
 async def clear_recs():
