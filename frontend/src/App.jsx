@@ -59,18 +59,16 @@ function App() {
     const finalScore = Math.round((correctCount / questions.length) * 100);
     setScore(finalScore);
     
-    // 🌟 強制跳轉防護網：不管伺服器有沒有活著，一定會讓夥伴看到分數！
     try {
       await fetch(`${API_BASE}/submit`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        // 🌟 修正傳送欄位名稱，確保與後端一致
         body: JSON.stringify({ user_name: user.name, emp_id: user.emp_id, score: finalScore, detail: detail })
       });
     } catch (e) {
       alert("⚠️ 網路不穩或伺服器休眠，成績未能上傳成功！\n但您仍可查看本次測驗分數，請截圖結果給店長紀錄。");
     } finally {
-      setView('result'); // 絕對會跳轉到分數畫面
+      setView('result'); 
     }
   };
 
@@ -143,7 +141,6 @@ function AdminPanel() {
 
   useEffect(() => { fetchData(); }, []);
 
-  // 🌟 自動跳轉小工具
   const scrollToDraft = () => {
     setTimeout(() => {
       const draftArea = document.getElementById("draft-section");
@@ -160,7 +157,7 @@ function AdminPanel() {
       if (res.ok) {
         alert("✅ 題目已成功加入草稿！畫面將為您移動至下方檢查。");
         fetchData();
-        scrollToDraft(); // 🌟 呼叫自動向下跳轉
+        scrollToDraft(); 
       } else {
         alert("❌ 生成失敗，可能是檔案格式不符，請再試一次。");
       }
@@ -173,7 +170,7 @@ function AdminPanel() {
     const newId = tempQs.length > 0 ? Math.max(...tempQs.map(q => q.id)) + 1 : 1;
     const blank = { id: newId, q: "請輸入題目內容", options: { A: "", B: "", C: "", D: "" }, ans: "A" };
     setTempQs([...tempQs, blank]);
-    scrollToDraft(); // 🌟 新增題目時也自動向下跳轉
+    scrollToDraft(); 
   };
 
   const saveTemp = async () => {
@@ -227,7 +224,7 @@ function AdminPanel() {
           body: JSON.stringify(newDraft)
         });
         alert(`✅ 成功匯入 ${formattedData.length} 題並儲存至草稿！\n畫面將為您移動至下方檢查。`);
-        scrollToDraft(); // 🌟 匯入成功時也自動向下跳轉
+        scrollToDraft(); 
       } catch (err) {
         alert("❌ 匯入失敗：檔案不是正確的題庫格式 (JSON)。");
       }
@@ -236,6 +233,7 @@ function AdminPanel() {
     e.target.value = null; 
   };
 
+  // 🌟 強化版發布，帶有嚴格錯誤抓取機制
   const publish = async () => {
     if (tempQs.length === 0) {
       return alert("⚠️ 錯誤：草稿區目前是空的！\n請先上傳 SOP 或是匯入 JSON 後，再按正式發布。");
@@ -249,7 +247,6 @@ function AdminPanel() {
         body: JSON.stringify(tempQs)
       });
       
-      // 🌟 嚴格防護網：如果後端沒有成功儲存，強行把錯誤抓出來！
       if (!res.ok) {
         const errText = await res.text();
         throw new Error(`伺服器拒絕儲存 (${res.status}): ${errText}`);
@@ -259,6 +256,28 @@ function AdminPanel() {
       fetchData(); 
     } catch (error) {
       alert(`❌ 發布失敗！\n系統沒有成功儲存，請截圖此錯誤檢查：\n${error.message}`);
+    }
+  };
+
+  // 🌟 把消失的清空線上題庫功能補回來！
+  const clearFinal = async () => {
+    if (finalQs.length === 0) return alert("目前沒有發布的題庫！");
+    if (!window.confirm("⚠️ 警告：確定要清空線上題庫嗎？清空後夥伴將無法進行測驗！")) return;
+    
+    try {
+      const res = await fetch(`${API_BASE}/admin/publish-questions`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify([]) 
+      });
+      if (!res.ok) {
+        const errText = await res.text();
+        throw new Error(`伺服器拒絕儲存 (${res.status}): ${errText}`);
+      }
+      alert("線上題庫已成功清空！");
+      fetchData();
+    } catch (error) {
+      alert(`❌ 清空失敗！\n${error.message}`);
     }
   };
 
@@ -306,7 +325,11 @@ function AdminPanel() {
           {loading && <p style={{ color: '#e67e22', fontWeight: 'bold' }}>🚀 AI 正在閱讀並產題中，請稍候...</p>}
           
           <div style={{ marginTop: '20px', border: '1px solid #bdc3c7', borderRadius: '10px', padding: '15px', backgroundColor: '#fff' }}>
-            <h4 style={{ margin: '0 0 10px 0', color: '#2c3e50' }}>💡 目前線上發布的題庫 ({finalQs.length} 題)</h4>
+            {/* 🌟 清空線上題庫按鈕加在這裡！ */}
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
+              <h4 style={{ margin: 0, color: '#2c3e50' }}>💡 目前線上發布的題庫 ({finalQs.length} 題)</h4>
+              <button onClick={clearFinal} style={{ ...miniBtnStyle, color: '#e74c3c', borderColor: '#e74c3c' }}>🚫 清空線上題庫</button>
+            </div>
             <div style={{ height: '200px', overflowY: 'auto', fontSize: '13px' }}>
               {finalQs && finalQs.length > 0 ? (
                 finalQs.map((q, i) => <div key={i} style={{ padding: '5px 0', borderBottom: '1px solid #f1f1f1' }}>{q.id}. {q.q}</div>)
@@ -316,7 +339,6 @@ function AdminPanel() {
             </div>
           </div>
 
-          {/* 🌟 加入 id="draft-section" 讓系統知道跳轉要捲動到哪裡 */}
           <div id="draft-section">
             {tempQs.length > 0 && (
               <div style={{ marginTop: '20px', padding: '15px', backgroundColor: '#fff3cd', borderRadius: '10px' }}>
