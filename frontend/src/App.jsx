@@ -60,21 +60,13 @@ function App() {
     setScore(finalScore);
     
     try {
-      const res = await fetch(`${API_BASE}/submit`, {
+      await fetch(`${API_BASE}/submit`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ user_name: user.name, emp_id: user.emp_id, score: finalScore, detail: detail })
       });
-      
-      // 🌟 新增：如果後端亮紅燈，強行把真正的錯誤原因抓出來
-      if (!res.ok) {
-        const errText = await res.text();
-        throw new Error(`伺服器拒絕儲存 (${res.status}): ${errText}`);
-      }
-      
     } catch (e) {
-      // 🌟 新增：把真實的錯誤代碼吐出來給我們看！
-      alert(`⚠️ 成績未能上傳成功！\n詳細錯誤：${e.message}\n\n但您仍可查看本次測驗分數，請截圖結果給店長紀錄。`);
+      alert("⚠️ 網路不穩或伺服器休眠，成績未能上傳成功！\n但您仍可查看本次測驗分數，請截圖結果給店長紀錄。");
     } finally {
       setView('result'); 
     }
@@ -132,9 +124,12 @@ function AdminPanel() {
   const [records, setRecords] = useState([]);
   const [loading, setLoading] = useState(false);
   const [showDetail, setShowDetail] = useState(null);
+  // 🌟 新增：用來顯示「正在刷新中」的小提示狀態
+  const [isRefreshing, setIsRefreshing] = useState(false); 
 
-  const fetchData = async () => {
+  const fetchData = async (showToast = false) => {
     try {
+      if(showToast) setIsRefreshing(true);
       const ts = new Date().getTime();
       const [tRes, fRes, rRes] = await Promise.all([
         fetch(`${API_BASE}/admin/temp-questions?t=${ts}`),
@@ -144,7 +139,14 @@ function AdminPanel() {
       setTempQs(await tRes.json() || []);
       setFinalQs(await fRes.json() || []);
       setRecords(await rRes.json() || []);
-    } catch (e) { console.error("資料載入失敗"); }
+      
+      if(showToast) {
+        setTimeout(() => setIsRefreshing(false), 800); // 讓刷新動畫跑一下比較有感
+      }
+    } catch (e) { 
+      console.error("資料載入失敗"); 
+      setIsRefreshing(false);
+    }
   };
 
   useEffect(() => { fetchData(); }, []);
@@ -241,7 +243,6 @@ function AdminPanel() {
     e.target.value = null; 
   };
 
-  // 🌟 強化版發布，帶有嚴格錯誤抓取機制
   const publish = async () => {
     if (tempQs.length === 0) {
       return alert("⚠️ 錯誤：草稿區目前是空的！\n請先上傳 SOP 或是匯入 JSON 後，再按正式發布。");
@@ -267,7 +268,6 @@ function AdminPanel() {
     }
   };
 
-  // 🌟 把消失的清空線上題庫功能補回來！
   const clearFinal = async () => {
     if (finalQs.length === 0) return alert("目前沒有發布的題庫！");
     if (!window.confirm("⚠️ 警告：確定要清空線上題庫嗎？清空後夥伴將無法進行測驗！")) return;
@@ -333,7 +333,6 @@ function AdminPanel() {
           {loading && <p style={{ color: '#e67e22', fontWeight: 'bold' }}>🚀 AI 正在閱讀並產題中，請稍候...</p>}
           
           <div style={{ marginTop: '20px', border: '1px solid #bdc3c7', borderRadius: '10px', padding: '15px', backgroundColor: '#fff' }}>
-            {/* 🌟 清空線上題庫按鈕加在這裡！ */}
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
               <h4 style={{ margin: 0, color: '#2c3e50' }}>💡 目前線上發布的題庫 ({finalQs.length} 題)</h4>
               <button onClick={clearFinal} style={{ ...miniBtnStyle, color: '#e74c3c', borderColor: '#e74c3c' }}>🚫 清空線上題庫</button>
@@ -399,7 +398,20 @@ function AdminPanel() {
         </div>
 
         <div style={cardStyle}>
-          <h3>📈 夥伴考核成績紀錄 <button onClick={clearRecords} style={{ ...miniBtnStyle, color: '#e74c3c', borderColor: '#e74c3c', float: 'right' }}>清空成績</button></h3>
+          {/* 🌟 加入刷新成績的按鈕 */}
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '15px' }}>
+            <h3 style={{ margin: 0 }}>
+              📈 夥伴考核成績紀錄 
+              <button 
+                onClick={() => fetchData(true)} 
+                style={{ ...miniBtnStyle, marginLeft: '10px', color: '#3498db', borderColor: '#3498db' }}
+              >
+                {isRefreshing ? '🔄 刷新中...' : '🔄 刷新成績'}
+              </button>
+            </h3>
+            <button onClick={clearRecords} style={{ ...miniBtnStyle, color: '#e74c3c', borderColor: '#e74c3c' }}>🗑️ 清空成績</button>
+          </div>
+
           <table style={{ width: '100%', borderCollapse: 'collapse', marginTop: '10px' }}>
             <thead>
               <tr style={{ backgroundColor: '#ecf0f1' }}>
@@ -414,6 +426,11 @@ function AdminPanel() {
                   <td style={tdStyle}><button onClick={() => setShowDetail(r)} style={miniBtnStyle}>👀 查看</button></td>
                 </tr>
               ))}
+              {records.length === 0 && (
+                <tr>
+                  <td colSpan="3" style={{ textAlign: 'center', padding: '20px', color: '#7f8c8d' }}>目前還沒有夥伴完成測驗喔！</td>
+                </tr>
+              )}
             </tbody>
           </table>
         </div>
