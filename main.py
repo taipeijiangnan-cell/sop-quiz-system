@@ -13,7 +13,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# 🌟 改為抓取 Groq 金鑰
+# 抓取 Groq 金鑰
 GROQ_API_KEY = os.getenv("GROQ_API_KEY", "").strip()
 
 def init_db():
@@ -57,21 +57,31 @@ async def generate_quiz(files: List[UploadFile] = File(...)):
     for f in files: 
         all_text += f"\n\n[File: {f.filename}]\n{await extract_text(f)}"
     
+    # 🌟 修改提示詞：要求回傳帶有 "quiz" 屬性的 JSON 物件
     prompt = f"""你是一個門市培訓專家。請針對內文設計「20題」繁體中文單選題。
-    必須嚴格回傳 JSON 陣列格式！不要加上任何說明文字或 Markdown 標籤，只要純陣列！
-    格式範例：[ {{"q": "題目", "options": {{"A": "選項A", "B": "選項B", "C": "選項C", "D": "選項D"}}, "ans": "A"}} ]
+    必須嚴格以 JSON 物件格式回傳，且包含一個名為 "quiz" 的陣列！
+    格式範例：
+    {{
+      "quiz": [
+        {{
+          "q": "題目",
+          "options": {{"A": "選項A", "B": "選項B", "C": "選項C", "D": "選項D"}},
+          "ans": "A"
+        }}
+      ]
+    }}
     內容：{all_text[:5000]}"""
     
-    # 🌟 使用 Groq API 終端點
     url = "https://api.groq.com/openai/v1/chat/completions"
     headers = {
         "Authorization": f"Bearer {GROQ_API_KEY}",
         "Content-Type": "application/json"
     }
     payload = {
-        "model": "llama-3.1-8b-instant", # 🌟 使用 Groq 速度最快的 Llama 3.1 模型
+        "model": "llama-3.1-8b-instant",
         "messages": [{"role": "user", "content": prompt}],
-        "temperature": 0.5
+        "temperature": 0.5,
+        "response_format": {"type": "json_object"} # 🌟 終極殺手鐧：強制鎖定 JSON 模式，不准講廢話
     }
     
     try:
@@ -79,15 +89,25 @@ async def generate_quiz(files: List[UploadFile] = File(...)):
         if res.status_code != 200:
             raise Exception(f"Groq API 錯誤: {res.text}")
             
-        # 抓取 AI 回傳的文字內容
         raw_content = res.json()['choices'][0]['message']['content']
         
-        # 清理 JSON
-        match = re.search(r'\[.*\]', raw_content, re.DOTALL)
-        if not match: 
-            raise Exception("AI 回傳格式不符合 JSON 陣列。")
-        
-        parsed = json.loads(match.group())
+        # 🌟 智慧解析 JSON
+        try:
+            parsed_json = json.loads(raw_content)
+            parsed = parsed_json.get("quiz", [])
+            # 如果 AI 忘記包裝 quiz，嘗試智慧尋找陣列
+            if not parsed and isinstance(parsed_json, list):
+                parsed = parsed_json
+            elif not parsed:
+                for k, v in parsed_json.items():
+                    if isinstance(v, list):
+                        parsed = v
+                        break
+        except Exception as e:
+            raise Exception(f"JSON 解析失敗，AI 回覆了看不懂的格式。前50字：{raw_content[:50]}")
+            
+        if not parsed or not isinstance(parsed, list):
+            raise Exception("AI 沒有回傳有效的題目列表，請再試一次。")
         
         conn = sqlite3.connect("quiz_data.db")
         old = conn.execute("SELECT data FROM temp_qs WHERE id=1").fetchone()
