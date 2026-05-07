@@ -24,7 +24,6 @@ def init_db():
     cursor.execute("CREATE TABLE IF NOT EXISTS final_qs (id INTEGER PRIMARY KEY, data TEXT)")
     cursor.execute("CREATE TABLE IF NOT EXISTS records (emp_id TEXT PRIMARY KEY, name TEXT, score INTEGER, detail TEXT)")
     
-    # 自動升級防護罩
     try:
         cursor.execute("SELECT detail FROM records LIMIT 1")
     except sqlite3.OperationalError:
@@ -64,36 +63,51 @@ async def generate_quiz(files: List[UploadFile] = File(...)):
     範例：[ {{"q": "題目", "options": {{"A": "選項A", "B": "選項B", "C": "選項C", "D": "選項D"}}, "ans": "A"}} ]
     內容：{all_text[:5000]}"""
     
-    # 🌟 升級為 Google 最穩定的正式版 (v1) API 與標準模型
-    url = f"https://generativelanguage.googleapis.com/v1/models/gemini-1.5-flash:generateContent?key={API_KEY}"
+    # 🌟 終極引擎：把 Google 所有的標準模型輪流敲門測一遍
+    models_to_test = [
+        "gemini-1.5-flash",
+        "gemini-1.5-flash-latest",
+        "gemini-1.0-pro",
+        "gemini-pro"
+    ]
     
-    try:
-        res = requests.post(url, json={"contents": [{"parts": [{"text": prompt}]}]}, timeout=90)
-        
-        # 🌟 攔截各種錯誤並轉為白話文
-        if res.status_code != 200:
-            err_detail = res.json().get('error', {}).get('message', res.text)
-            print(f"API錯誤: {err_detail}")
-            
-            if res.status_code == 404 and "not found" in err_detail:
-                raise Exception("您目前的 API 金鑰被 Google 限制了模型權限！請至 Google AI Studio 申請一把「全新的金鑰」並更新到 Render 後台。")
-            elif res.status_code == 400:
-                raise Exception("您的 API 金鑰格式不正確！請檢查 Render 後台的設定。")
+    success = False
+    last_err_detail = ""
+    data = None
+    
+    for model in models_to_test:
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={API_KEY}"
+        try:
+            res = requests.post(url, json={"contents": [{"parts": [{"text": prompt}]}]}, timeout=90)
+            if res.status_code == 200:
+                data = res.json()
+                success = True
+                print(f"✅ 成功使用模型: {model}")
+                break
             else:
-                raise Exception(f"Google 拒絕請求 (代碼: {res.status_code}) - {err_detail}")
+                last_err_detail = res.json().get('error', {}).get('message', res.text)
+                print(f"❌ 模型 {model} 失敗: {last_err_detail}")
+        except Exception as e:
+            last_err_detail = str(e)
+            print(f"❌ 連線失敗: {last_err_detail}")
 
-        data = res.json()
+    if not success:
+        # 🌟 照妖鏡：顯示目前伺服器真正在用的金鑰前6碼
+        safe_key = API_KEY[:6] + "..." if len(API_KEY) > 6 else "無效金鑰"
+        raise HTTPException(
+            status_code=500, 
+            detail=f"Google 拒絕了所有模型！請核對：目前伺服器讀到的金鑰開頭是「{safe_key}」。如果這不是新金鑰的開頭，代表 Render 沒有更新成功，請去 Render 點擊 Deploy latest commit！ (錯誤: {last_err_detail})"
+        )
+
+    try:
         if "candidates" not in data or not data["candidates"]:
             raise Exception("AI 沒有回傳任何內容，可能是觸發了安全阻擋。")
             
         raw = data['candidates'][0]['content']['parts'][0]['text']
-        
         match = re.search(r'\[.*\]', raw, re.DOTALL)
-        if not match: 
-            raise Exception("AI 回傳的格式嚴重錯亂，請再試一次。")
+        if not match: raise Exception("AI 回傳的格式嚴重錯亂，請再試一次。")
         
         parsed = json.loads(match.group())
-        
         conn = sqlite3.connect("quiz_data.db")
         old = conn.execute("SELECT data FROM temp_qs WHERE id=1").fetchone()
         existing = json.loads(old[0]) if old else []
@@ -117,12 +131,9 @@ async def generate_quiz(files: List[UploadFile] = File(...)):
         
         combined = existing + new_qs
         conn.execute("INSERT OR REPLACE INTO temp_qs (id, data) VALUES (1, ?)", (json.dumps(combined),))
-        conn.commit()
-        conn.close()
+        conn.commit(); conn.close()
         return {"status": "ok", "count": len(combined)}
-    
     except Exception as e: 
-        print(f"處理異常: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.delete("/admin/temp-clear")
@@ -140,7 +151,6 @@ async def get_qs(emp_id: str):
     data = conn.execute("SELECT data FROM final_qs WHERE id=1").fetchone()
     conn.close()
     if not data: raise HTTPException(status_code=400, detail="題庫未就緒")
-    
     all_qs = json.loads(data[0])
     return random.sample(all_qs, min(20, len(all_qs)))
 
@@ -181,7 +191,6 @@ async def get_recs():
         conn = sqlite3.connect("quiz_data.db")
         recs = conn.execute("SELECT emp_id, name, score, detail FROM records").fetchall()
         conn.close()
-        
         result = []
         for r in recs:
             try:
@@ -191,7 +200,6 @@ async def get_recs():
             result.append({"emp_id": r[0], "name": r[1], "score": r[2], "detail": det})
         return result
     except Exception as e:
-        print(f"讀取成績發生錯誤: {e}")
         return []
 
 @app.delete("/admin/records/clear")
