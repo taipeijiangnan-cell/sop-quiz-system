@@ -241,13 +241,25 @@ function AdminPanel() {
       return alert("⚠️ 錯誤：草稿區目前是空的！\n請先上傳 SOP 或是匯入 JSON 後，再按正式發布。");
     }
     if (!window.confirm(`確定發布這 ${tempQs.length} 題嗎？這將覆蓋目前的線上題庫。`)) return;
-    await fetch(`${API_BASE}/admin/publish-questions`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(tempQs)
-    });
-    alert("🚀 發布成功！夥伴現在可以使用新題庫測驗了。");
-    fetchData(); 
+    
+    try {
+      const res = await fetch(`${API_BASE}/admin/publish-questions`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(tempQs)
+      });
+      
+      // 🌟 嚴格防護網：如果後端沒有成功儲存，強行把錯誤抓出來！
+      if (!res.ok) {
+        const errText = await res.text();
+        throw new Error(`伺服器拒絕儲存 (${res.status}): ${errText}`);
+      }
+      
+      alert("🚀 發布成功！夥伴現在可以使用新題庫測驗了。");
+      fetchData(); 
+    } catch (error) {
+      alert(`❌ 發布失敗！\n系統沒有成功儲存，請截圖此錯誤檢查：\n${error.message}`);
+    }
   };
 
   const clearTemp = async () => {
