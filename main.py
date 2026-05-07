@@ -80,20 +80,18 @@ async def generate_quiz(files: List[UploadFile] = File(...)):
     - 類別五：叫貨與包裝規格 (4題)
 
     【✅ 輸出格式規範】
-    必須嚴格以 JSON 物件格式回傳。整個回覆的「第一個字元」必須是 {。
+    請直接以 JSON 陣列格式回傳，陣列內包含 20 個題目物件。
     格式範例：
-    {
-      "quiz": [
-        {
-          "q": "根據 SOP，製作一份檸檬凍時，加入檸檬汁後電磁爐應設定為多少火力？",
-          "options": {"A": "1000(P2)", "B": "1500(P4)", "C": "2000(P6)", "D": "500(P1)"},
-          "ans": "B"
-        }
-      ]
-    }"""
+    [
+      {
+        "q": "根據 SOP，製作一份檸檬凍時，加入檸檬汁後電磁爐應設定為多少火力？",
+        "options": {"A": "1000(P2)", "B": "1500(P4)", "C": "2000(P6)", "D": "500(P1)"},
+        "ans": "B"
+      }
+    ]"""
 
-    # 🌟 擷取前 5500 字，確保不會超過 12000 Token 的限制
-    user_prompt = f"請根據以下【文件內容】，設計「20 題」繁體中文單選題。\n\n【文件內容開始】\n{all_text[:5500]}\n【文件內容結束】\n\n【最後警告】：請直接從 {{ \"quiz\": [ ... 開始輸出，絕對不要在開頭加上檔名、標題或其他廢話！"
+    # 🌟 擷取前 4500 字，安全避開 12000 Token 上限
+    user_prompt = f"請根據以下【文件內容】，設計「20 題」繁體中文單選題。\n\n【文件內容開始】\n{all_text[:4500]}\n【文件內容結束】\n\n【最後警告】：請直接從 [ {{ \"q\": ... 開始輸出，絕對不要加任何廢話！"
     
     url = "https://api.com/v1/chat/completions".replace("api.com", "api.groq.com/openai")
     headers = {
@@ -107,8 +105,7 @@ async def generate_quiz(files: List[UploadFile] = File(...)):
             {"role": "user", "content": user_prompt}
         ],
         "temperature": 0.3, 
-        "max_tokens": 2500, # 🌟 精算後的安全值：2500 足夠產出 20 題 JSON，且加總不會超過免費額度
-        "response_format": {"type": "json_object"}
+        "max_tokens": 3500 # 🌟 加大輸出字數，且移除了 response_format 避免 API 崩潰
     }
     
     try:
@@ -116,34 +113,35 @@ async def generate_quiz(files: List[UploadFile] = File(...)):
         
         if res.status_code != 200:
             err_msg = res.json().get('error', {}).get('message', res.text)
-            # 🌟 針對爆字數的白話文錯誤攔截
             if "Limit 12000" in err_msg or "rate_limit" in err_msg.lower() or "too large" in err_msg.lower():
-                raise Exception("您上傳的檔案文字量太大啦！超過了 Groq 免費 API 的單次處理上限。請嘗試「刪除不需要的頁面」或「將檔案拆分成兩半」後再上傳！")
+                raise Exception("您上傳的檔案文字量太大啦！超過了 API 的單次處理上限。請嘗試「刪除不需要的頁面」後再上傳！")
             raise Exception(f"Groq API 錯誤: {err_msg}")
             
         raw_content = res.json()['choices'][0]['message']['content']
         
-        start_idx = raw_content.find('{')
-        if start_idx != -1:
-            raw_content = raw_content[start_idx:]
-        else:
-            raise Exception("AI 完全沒有回傳 JSON 格式。")
-            
-        try:
-            parsed_json = json.loads(raw_content)
-            parsed = parsed_json.get("quiz", [])
-            if not parsed and isinstance(parsed_json, list):
-                parsed = parsed_json
-            elif not parsed:
-                for k, v in parsed_json.items():
-                    if isinstance(v, list):
-                        parsed = v
+        # 🌟 鋼鐵磁鐵解析法：無視開頭廢話、無視尾巴斷掉，強行萃取所有完整題目
+        parsed = []
+        starts = [m.start() for m in re.finditer(r'\{\s*"(q|question|題目)"\s*:', raw_content)]
+        
+        for start in starts:
+            depth = 0
+            for i in range(start, len(raw_content)):
+                if raw_content[i] == '{':
+                    depth += 1
+                elif raw_content[i] == '}':
+                    depth -= 1
+                    if depth == 0:
+                        try:
+                            # 抓出完整的物件並嘗試解析
+                            obj = json.loads(raw_content[start:i+1])
+                            if "options" in obj and "ans" in obj:
+                                parsed.append(obj)
+                        except:
+                            pass
                         break
-        except Exception as e:
-            raise Exception(f"JSON 解析失敗，AI 回覆了看不懂的格式。前50字：{raw_content[:50]}")
-            
-        if not parsed or not isinstance(parsed, list):
-            raise Exception("AI 沒有回傳有效的題目列表，請再試一次。")
+                        
+        if not parsed:
+            raise Exception("AI 沒有成功生成任何完整的題目，請嘗試減少檔案內容或重試一次。")
         
         conn = sqlite3.connect("quiz_data.db")
         old = conn.execute("SELECT data FROM temp_qs WHERE id=1").fetchone()
@@ -159,9 +157,10 @@ async def generate_quiz(files: List[UploadFile] = File(...)):
                 opts["C"] = str(raw_opts.get("C", raw_opts.get("c", "選項C")))
                 opts["D"] = str(raw_opts.get("D", raw_opts.get("d", "選項D")))
             
+            q_text = str(x.get('q', x.get('question', x.get('題目', '無題目'))))
             new_qs.append({
                 "id": len(existing) + len(new_qs) + 1,
-                "q": str(x.get('q', '無題目')),
+                "q": q_text,
                 "options": opts,
                 "ans": str(x.get('ans', 'A')).upper()
             })
