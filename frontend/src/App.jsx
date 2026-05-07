@@ -9,6 +9,7 @@ function App() {
   const [questions, setQuestions] = useState([]);
   const [answers, setAnswers] = useState({});
   const [score, setScore] = useState(0);
+  const [timeLeft, setTimeLeft] = useState(1200); // 🌟 新增：計時器狀態 (預設 1200 秒 = 20 分鐘)
 
   useEffect(() => {
     document.title = isAdmin ? "考核系統後端" : "再睡五分鐘考核系統";
@@ -27,8 +28,28 @@ function App() {
       if (!res.ok) return alert("題庫尚未發布，請洽店長");
       const data = await res.json();
       setQuestions(data);
+      setTimeLeft(1200); // 🌟 每次開始測驗時，重置為 20 分鐘
       setView('quiz');
     } catch (e) { alert("系統連線失敗"); }
+  };
+
+  // 🌟 新增：倒數計時器邏輯
+  useEffect(() => {
+    if (view !== 'quiz') return;
+    if (timeLeft <= 0) {
+      alert("⏳ 考試時間到！系統將自動為您交卷。");
+      submitQuiz(); // 時間到自動觸發交卷
+      return;
+    }
+    const timer = setTimeout(() => setTimeLeft(timeLeft - 1), 1000);
+    return () => clearTimeout(timer);
+  }, [view, timeLeft]);
+
+  // 🌟 新增：將秒數轉換為 分:秒 的小工具
+  const formatTime = (seconds) => {
+    const m = Math.floor(seconds / 60).toString().padStart(2, '0');
+    const s = (seconds % 60).toString().padStart(2, '0');
+    return `${m}:${s}`;
   };
 
   const submitQuiz = async () => {
@@ -62,7 +83,14 @@ function App() {
       )}
       {view === 'quiz' && (
         <div>
-          <h3>✍️ 測驗中 (共 {questions.length} 題)</h3>
+          {/* 🌟 新增：置頂浮動的計時器介面 */}
+          <div style={{ position: 'sticky', top: 0, backgroundColor: '#fff', padding: '15px 0', borderBottom: '2px solid #3498db', zIndex: 100, display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
+            <h3 style={{ margin: 0 }}>✍️ 測驗中 (共 {questions.length} 題)</h3>
+            <h3 style={{ margin: 0, color: timeLeft <= 60 ? '#e74c3c' : '#27ae60' }}>
+              ⏳ 剩餘：{formatTime(timeLeft)}
+            </h3>
+          </div>
+
           {questions.map((q, idx) => (
             <div key={idx} style={qBoxStyle}>
               <p><b>{idx + 1}. {q.q}</b></p>
