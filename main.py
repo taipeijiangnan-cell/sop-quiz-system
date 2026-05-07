@@ -56,7 +56,6 @@ async def generate_quiz(files: List[UploadFile] = File(...)):
     for f in files: 
         extracted = await extract_text(f)
         if extracted.strip():
-            # 🌟 移除檔名標記，避免 AI 把檔名當作 JSON 的一部分
             all_text += f"\n\n{extracted}"
             
     if len(all_text.strip()) < 50:
@@ -93,7 +92,8 @@ async def generate_quiz(files: List[UploadFile] = File(...)):
       ]
     }"""
 
-    user_prompt = f"請根據以下【文件內容】，設計「20 題」繁體中文單選題。\n\n【文件內容開始】\n{all_text[:10000]}\n【文件內容結束】\n\n【最後警告】：請直接從 {{ \"quiz\": [ ... 開始輸出，絕對不要在開頭加上檔名、標題或其他廢話！"
+    # 🌟 擷取前 5500 字，確保不會超過 12000 Token 的限制
+    user_prompt = f"請根據以下【文件內容】，設計「20 題」繁體中文單選題。\n\n【文件內容開始】\n{all_text[:5500]}\n【文件內容結束】\n\n【最後警告】：請直接從 {{ \"quiz\": [ ... 開始輸出，絕對不要在開頭加上檔名、標題或其他廢話！"
     
     url = "https://api.com/v1/chat/completions".replace("api.com", "api.groq.com/openai")
     headers = {
@@ -107,18 +107,22 @@ async def generate_quiz(files: List[UploadFile] = File(...)):
             {"role": "user", "content": user_prompt}
         ],
         "temperature": 0.3, 
-        "max_tokens": 4000, # 🌟 關鍵修正：給予超大字數上限，防止寫一半斷掉
+        "max_tokens": 2500, # 🌟 精算後的安全值：2500 足夠產出 20 題 JSON，且加總不會超過免費額度
         "response_format": {"type": "json_object"}
     }
     
     try:
-        res = requests.post(url, headers=headers, json=payload, timeout=120) # 🌟 延長等待時間至 2 分鐘
+        res = requests.post(url, headers=headers, json=payload, timeout=120)
+        
         if res.status_code != 200:
-            raise Exception(f"Groq API 錯誤: {res.text}")
+            err_msg = res.json().get('error', {}).get('message', res.text)
+            # 🌟 針對爆字數的白話文錯誤攔截
+            if "Limit 12000" in err_msg or "rate_limit" in err_msg.lower() or "too large" in err_msg.lower():
+                raise Exception("您上傳的檔案文字量太大啦！超過了 Groq 免費 API 的單次處理上限。請嘗試「刪除不需要的頁面」或「將檔案拆分成兩半」後再上傳！")
+            raise Exception(f"Groq API 錯誤: {err_msg}")
             
         raw_content = res.json()['choices'][0]['message']['content']
         
-        # 🌟 暴力清洗：如果 AI 還是不聽話加了奇怪的開頭，我們強制找到第一個 '{'
         start_idx = raw_content.find('{')
         if start_idx != -1:
             raw_content = raw_content[start_idx:]
