@@ -20,6 +20,13 @@ def init_db():
     cursor = conn.cursor()
     cursor.execute("CREATE TABLE IF NOT EXISTS temp_qs (id INTEGER PRIMARY KEY, data TEXT)")
     cursor.execute("CREATE TABLE IF NOT EXISTS final_qs (id INTEGER PRIMARY KEY, data TEXT)")
+    
+    # 🌟 自動升級舊版資料庫：如果發現是舊版(沒有 detail 欄位)，就砍掉重建
+    try:
+        cursor.execute("SELECT detail FROM records LIMIT 1")
+    except sqlite3.OperationalError:
+        cursor.execute("DROP TABLE IF EXISTS records")
+        
     # 確保成績紀錄的欄位完全正確
     cursor.execute("CREATE TABLE IF NOT EXISTS records (emp_id TEXT PRIMARY KEY, name TEXT, score INTEGER, detail TEXT)")
     conn.commit()
