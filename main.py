@@ -55,22 +55,35 @@ async def generate_quiz(files: List[UploadFile] = File(...)):
 
     all_text = ""
     for f in files: 
-        all_text += f"\n\n[File: {f.filename}]\n{await extract_text(f)}"
+        extracted = await extract_text(f)
+        if extracted.strip():
+            all_text += f"\n\n[File: {f.filename}]\n{extracted}"
+            
+    # 🌟 防呆：如果讀出來完全沒有字 (例如上傳了純圖片的PDF)
+    if not all_text.strip():
+        raise HTTPException(status_code=400, detail="無法從檔案中讀取出任何文字！請確認您的 PDF 不是「純圖片掃描檔」，建議改用 Word 檔或含有純文字的 PDF 上傳。")
     
-    # 🌟 修改提示詞：要求回傳帶有 "quiz" 屬性的 JSON 物件
-    prompt = f"""你是一個門市培訓專家。請針對內文設計「20題」繁體中文單選題。
-    必須嚴格以 JSON 物件格式回傳，且包含一個名為 "quiz" 的陣列！
-    格式範例：
+    # 🌟 強化提示詞：用嚴厲的語氣限制 AI 絕對不能亂出題
+    prompt = f"""你是一個嚴格的門市培訓專家。
+    【任務指令】
+    請「完全根據」下方提供的【文件內容】，設計出最多 20 題的繁體中文單選題。
+    嚴格禁止：絕對不可以自己編造與文件無關的常識題或數學題！所有的題目與答案都必須能從文件中找到依據。
+
+    【輸出格式要求】
+    必須嚴格以 JSON 物件格式回傳，且包含一個名為 "quiz" 的陣列！不要加上任何 Markdown 標記或引言。
     {{
       "quiz": [
         {{
-          "q": "題目",
-          "options": {{"A": "選項A", "B": "選項B", "C": "選項C", "D": "選項D"}},
+          "q": "<在此填入根據文件設計的真實題目>",
+          "options": {{"A": "<選項內容>", "B": "<選項內容>", "C": "<選項內容>", "D": "<選項內容>"}},
           "ans": "A"
         }}
       ]
     }}
-    內容：{all_text[:5000]}"""
+
+    【文件內容開始】
+    {all_text[:8000]}
+    【文件內容結束】"""
     
     url = "https://api.groq.com/openai/v1/chat/completions"
     headers = {
@@ -80,8 +93,8 @@ async def generate_quiz(files: List[UploadFile] = File(...)):
     payload = {
         "model": "llama-3.1-8b-instant",
         "messages": [{"role": "user", "content": prompt}],
-        "temperature": 0.5,
-        "response_format": {"type": "json_object"} # 🌟 終極殺手鐧：強制鎖定 JSON 模式，不准講廢話
+        "temperature": 0.2, # 🌟 降低溫度，強迫 AI 只能照本宣科，不准發揮創意
+        "response_format": {"type": "json_object"}
     }
     
     try:
@@ -91,11 +104,9 @@ async def generate_quiz(files: List[UploadFile] = File(...)):
             
         raw_content = res.json()['choices'][0]['message']['content']
         
-        # 🌟 智慧解析 JSON
         try:
             parsed_json = json.loads(raw_content)
             parsed = parsed_json.get("quiz", [])
-            # 如果 AI 忘記包裝 quiz，嘗試智慧尋找陣列
             if not parsed and isinstance(parsed_json, list):
                 parsed = parsed_json
             elif not parsed:
