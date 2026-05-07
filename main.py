@@ -109,45 +109,18 @@ async def get_temp():
     conn.close()
     return json.loads(data[0]) if data else []
 
-@app.delete("/admin/temp-clear")
-async def clear_temp():
-    conn = sqlite3.connect("quiz_data.db")
-    conn.execute("DELETE FROM temp_qs")
-    conn.commit(); conn.close()
-    return {"status": "ok"}
-
 @app.post("/admin/publish-questions")
 async def publish(data: List[dict]):
-    conn = sqlite3.connect("quiz_data.db")
-    conn.execute("DELETE FROM final_qs")
-    conn.execute("INSERT INTO final_qs (id, data) VALUES (1, ?)", (json.dumps(data),))
-    conn.commit(); conn.close()
+    try:
+        conn = sqlite3.connect("quiz_data.db")
+        # 🌟 改用 INSERT OR REPLACE 強制覆蓋，避免刪除後寫入失敗的空窗期
+        conn.execute("INSERT OR REPLACE INTO final_qs (id, data) VALUES (1, ?)", (json.dumps(data),))
+        conn.commit()
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"資料庫儲存失敗: {str(e)}")
+    finally:
+        conn.close()
     return {"status": "ok"}
-
-@app.get("/get-questions")
-async def get_qs(emp_id: str):
-    conn = sqlite3.connect("quiz_data.db")
-    if conn.execute("SELECT score FROM records WHERE emp_id=?", (emp_id,)).fetchone():
-        conn.close(); raise HTTPException(status_code=403, detail="此工號已完成考核")
-    data = conn.execute("SELECT data FROM final_qs WHERE id=1").fetchone()
-    conn.close()
-    if not data: raise HTTPException(status_code=400, detail="題庫未就緒")
-    all_qs = json.loads(data[0])
-    return random.sample(all_qs, min(20, len(all_qs)))
-
-@app.post("/submit")
-async def submit(data: dict):
-    conn = sqlite3.connect("quiz_data.db")
-    conn.execute("INSERT OR REPLACE INTO records (emp_id, name, score, detail) VALUES (?, ?, ?, ?)", (data['emp_id'], data['name'], data['score'], json.dumps(data['detail'])))
-    conn.commit(); conn.close()
-    return {"status": "ok"}
-
-@app.get("/admin/current-final")
-async def get_final():
-    conn = sqlite3.connect("quiz_data.db")
-    data = conn.execute("SELECT data FROM final_qs WHERE id=1").fetchone()
-    conn.close()
-    return json.loads(data[0]) if data else []
 
 @app.get("/admin/records")
 async def get_recs():
