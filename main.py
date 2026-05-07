@@ -3,7 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 import json, io, pypdf, docx, requests, sqlite3, re, os, random
 from typing import List
 
-app = FastAPI()
+app = FastAPI(title="考核系統後端")
 
 app.add_middleware(
     CORSMiddleware,
@@ -13,7 +13,6 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# 抓取 Groq 金鑰
 GROQ_API_KEY = os.getenv("GROQ_API_KEY", "").strip()
 
 def init_db():
@@ -57,31 +56,32 @@ async def generate_quiz(files: List[UploadFile] = File(...)):
     for f in files: 
         extracted = await extract_text(f)
         if extracted.strip():
-            all_text += f"\n\n[File: {f.filename}]\n{extracted}"
+            # 🌟 移除檔名標記，避免 AI 把檔名當作 JSON 的一部分
+            all_text += f"\n\n{extracted}"
             
     if len(all_text.strip()) < 50:
         raise HTTPException(status_code=400, detail="檔案內文太少或無法解析文字！請確認您的 PDF 是「可以反白複製文字」的檔案，而不是純圖片掃描檔。")
     
-    # 🌟 究極大師級提示詞：解決「不精準」與「重複出題」問題
     system_prompt = """你是一位極度嚴格、專注於細節的「飲料店 SOP 考核出題官」。
     你的任務是將【文件內容】轉化為精準、專業的員工測驗題。
 
     【🔴 嚴重違規行為（絕對禁止，觸犯視為不及格）】
-    1. 題目缺少主詞與情境：題目【絕對不可以】只問「常溫靜置多久？」或「要加多少克？」。必須明確寫出完整情境與物品名稱！例如：「根據 SOP，製作『檸檬凍』過濾後，應常溫靜置多久？」、「製作大杯『黑桑莓莓沙沙』需要加入多少克檸檬凍？」。
-    2. 題目重複：這 20 題的考點必須【完全不重複】！絕對不准出兩題意思一樣或考同一個數值的題目。
-    3. 禁用模糊代名詞與敷衍選項：禁止使用「某產品」、「該物料」。選項必須是具體的數字或做法，禁止「未指定」、「以上皆是」、「以上皆非」。
-    4. 禁止常識題與數學題：答案必須 100% 來自文件，不准考「1+1」或「體積單位是什麼」。
+    1. 絕對禁止在開頭加上任何檔名、標題或說明！
+    2. 題目缺少主詞與情境：必須明確寫出完整情境與物品名稱。
+    3. 題目重複：考點必須【完全不重複】。
+    4. 禁用模糊代名詞與敷衍選項：禁止使用「某產品」、「該物料」。選項必須是具體的數字或做法，禁止「未指定」、「以上皆是」、「以上皆非」。
+    5. 禁止常識題與數學題。
 
     【🟢 出題金鑰：強制配額制 (完美達成 20 題且不重複)】
     請嚴格從以下 5 個類別「各挖掘 4 題」，確保考點均勻分佈在整份 SOP：
-    - 類別一：飲品配方細節 (4題) - 考果醬、茶湯、冰塊、蔗糖的具體克數/ml數。
-    - 類別二：機器與流程操作 (4題) - 考冰沙機按鍵、瞬轉秒數、杯子重量規範。
-    - 類別三：配料製作細節 (4題) - 考檸檬凍的砂糖量、電磁爐火力、靜置/冷藏時間、分切大小。
-    - 類別四：效期與保存規範 (4題) - 考各項果醬或配料的冷藏/常溫效期、換容器效期。
-    - 類別五：叫貨與包裝規格 (4題) - 考糖漿的桶裝/罐裝規格、一箱數量、叫貨週期。
+    - 類別一：飲品配方細節 (4題)
+    - 類別二：機器與流程操作 (4題)
+    - 類別三：配料製作細節 (4題)
+    - 類別四：效期與保存規範 (4題)
+    - 類別五：叫貨與包裝規格 (4題)
 
     【✅ 輸出格式規範】
-    必須嚴格以 JSON 物件格式回傳，包含一個名為 "quiz" 的陣列，內含 20 個題目物件。
+    必須嚴格以 JSON 物件格式回傳。整個回覆的「第一個字元」必須是 {。
     格式範例：
     {
       "quiz": [
@@ -93,8 +93,7 @@ async def generate_quiz(files: List[UploadFile] = File(...)):
       ]
     }"""
 
-    # 🌟 最終封口令：強制 AI 直接輸出 JSON，不准講任何廢話
-    user_prompt = f"請根據以下【文件內容】，嚴格遵守「強制配額制」的 5 大分類（每類 4 題），設計出考點完全不重複、題目主詞清晰的「20 題」繁體中文單選題。\n\n【文件內容開始】\n{all_text[:10000]}\n【文件內容結束】\n\n【最後警告】：請「直接」輸出 JSON 物件，第一個字元必須是 {{。絕對不可以寫出「好的」、「以下是...」等任何前言後語，也不要重複規則！"
+    user_prompt = f"請根據以下【文件內容】，設計「20 題」繁體中文單選題。\n\n【文件內容開始】\n{all_text[:10000]}\n【文件內容結束】\n\n【最後警告】：請直接從 {{ \"quiz\": [ ... 開始輸出，絕對不要在開頭加上檔名、標題或其他廢話！"
     
     url = "https://api.com/v1/chat/completions".replace("api.com", "api.groq.com/openai")
     headers = {
@@ -108,16 +107,24 @@ async def generate_quiz(files: List[UploadFile] = File(...)):
             {"role": "user", "content": user_prompt}
         ],
         "temperature": 0.3, 
+        "max_tokens": 4000, # 🌟 關鍵修正：給予超大字數上限，防止寫一半斷掉
         "response_format": {"type": "json_object"}
     }
     
     try:
-        res = requests.post(url, headers=headers, json=payload, timeout=90)
+        res = requests.post(url, headers=headers, json=payload, timeout=120) # 🌟 延長等待時間至 2 分鐘
         if res.status_code != 200:
             raise Exception(f"Groq API 錯誤: {res.text}")
             
         raw_content = res.json()['choices'][0]['message']['content']
         
+        # 🌟 暴力清洗：如果 AI 還是不聽話加了奇怪的開頭，我們強制找到第一個 '{'
+        start_idx = raw_content.find('{')
+        if start_idx != -1:
+            raw_content = raw_content[start_idx:]
+        else:
+            raise Exception("AI 完全沒有回傳 JSON 格式。")
+            
         try:
             parsed_json = json.loads(raw_content)
             parsed = parsed_json.get("quiz", [])
