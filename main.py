@@ -39,63 +39,63 @@ async def extract_text(file: UploadFile):
     try:
         if file.filename.lower().endswith(".pdf"):
             reader = pypdf.PdfReader(io.BytesIO(content))
-            for page in reader.pages: text += (page.extract_text() or "") + "\n"
+            for page in reader.pages: 
+                # 🌟 只抓取有意義的文字
+                t = page.extract_text() or ""
+                text += t + "\n"
         elif file.filename.lower().endswith(".docx"):
             doc = docx.Document(io.BytesIO(content))
             for p in doc.paragraphs: text += p.text + "\n"
         else: text += content.decode("utf-8")
     except Exception as e: print(f"檔案解析錯誤: {e}")
     
-    # 🌟 強化過濾亂碼：移除重複過多的符號或無意義排版字元
-    text = re.sub(r'(月|日| ) {3,}', '', text) 
-    text = re.sub(r'[\r\n\t]+', '\n', text)
+    # 🌟 強力清洗亂碼：移除重複字、頁碼標籤與怪符號
+    text = re.sub(r'[\r\t]+', ' ', text)
+    text = re.sub(r'(.)\1{4,}', '', text) # 移除連續超過 4 個重複的字(如月月月月)
+    text = re.sub(r'\n\s*\n+', '\n', text) # 移除過多換行
     return text
 
 @app.post("/generate-quiz")
 async def generate_quiz(files: List[UploadFile] = File(...)):
     if not GROQ_API_KEY:
-        raise HTTPException(status_code=500, detail="遺失 GROQ_API_KEY！請檢查 Render 環境變數。")
+        raise HTTPException(status_code=500, detail="遺失 GROQ_API_KEY！")
 
     all_text = ""
     for f in files: 
         extracted = await extract_text(f)
         if extracted.strip():
-            all_text += f"\n\n{extracted}"
+            all_text += extracted
             
-    if len(all_text.strip()) < 50:
-        raise HTTPException(status_code=400, detail="無法讀取檔案文字！請確認 PDF 不是純圖片。")
+    if len(all_text.strip()) < 30:
+        raise HTTPException(status_code=400, detail="無法讀取檔案文字！請確認 PDF 不是純圖片掃描檔。")
     
     # 🌟 究極嚴格 System Prompt：徹底封印 AI 的外部幻想
-    system_prompt = """你是一個完全沒有記憶的「再睡5分鐘」專屬出題機器人。
-    【絕對準則 - 違者嚴懲】
-    1. 你的世界只有我提供的【參考文件內容】。禁止使用你腦中任何關於飲料店、節日或 SOP 的外部知識。
-    2. 禁止幻想！絕對不准發明不存在的節日（如：夏日清涼節）、不存在的產品。
-    3. 每個題目和答案都必須在文件中找到「精準對應的字眼」。文件沒寫，你就絕對不准出！
-    4. 禁止出抽象題（如：應進行哪些工作？）。必須考具體的活動日期、折扣金額、話術規範或配方克數。
-    5. 如果內容不足以出 20 題高品質題目，請透過細分題目（例如同一個活動考日期、考話術、考限制）來達成 20 題，嚴禁編造。
+    system_prompt = """你是一個完全沒有記憶的「再睡5分鐘」門市出題機器人。
+    【絕對準則】
+    1. 你的世界只有我提供的【文件內容】。禁止使用任何外部知識或聯想。
+    2. 禁止幻想！絕對不准發明不存在的節日（如：夏日清涼節）、不存在的日期。
+    3. 每個題目和選項都必須在文件中找到「精準對應的原始字句」。
+    4. 所有的選項必須具體，禁止使用「以上皆是」、「未指定」或模糊敘述。
+    5. 必須嚴格以 JSON 陣列格式輸出。
 
     【✅ 輸出格式】
-    直接以 JSON 陣列格式輸出。格式範例：
     [
-      { "q": "根據文件，製作『茶泡飯奶蓋』時應跟顧客說什麼話術？", "options": {"A": "歡迎光臨", "B": "愚人節快樂", "C": "請先就口飲用", "D": "以上皆是"}, "ans": "B" }
+      { "q": "來自文件的具體問題？", "options": {"A": "具體選項", "B": "具體選項", "C": "具體選項", "D": "具體選項"}, "ans": "A" }
     ]"""
 
-    # 🌟 字數平衡 (Input: 4500, Output: 3500)，確保不觸發 12000 TPM 限制
-    user_prompt = f"請嚴格根據以下【參考文件內容】，設計 20 題具備文件依據的繁體中文單選題。不准幻想！\n\n【參考文件內容開始】\n{all_text[:4500]}\n【參考文件內容結束】\n\n請直接開始輸出 JSON 陣列，第一個字元必須是 [。"
+    # 🌟 嚴格控制輸入在 3000 字以內，確保總量不超過 12000 TPM
+    user_prompt = f"請根據以下【文件內容】，設計 20 題繁體中文單選題。不准幻想！\n\n【文件內容】\n{all_text[:3000]}\n\n請直接輸出 JSON 陣列，第一個字元必須是 [。"
     
     url = "https://api.groq.com/openai/v1/chat/completions"
-    headers = {
-        "Authorization": f"Bearer {GROQ_API_KEY}",
-        "Content-Type": "application/json"
-    }
+    headers = {"Authorization": f"Bearer {GROQ_API_KEY}", "Content-Type": "application/json"}
     payload = {
         "model": "llama-3.3-70b-versatile",
         "messages": [
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": user_prompt}
         ],
-        "temperature": 0.0, # 🌟 降到 0，徹底消滅創造力與幻想
-        "max_tokens": 3500, 
+        "temperature": 0.0, # 🌟 絕對零度，消滅創造力
+        "max_tokens": 2500, # 🌟 控制輸出長度
     }
     
     try:
@@ -104,12 +104,12 @@ async def generate_quiz(files: List[UploadFile] = File(...)):
         if res.status_code != 200:
             err_msg = res.json().get('error', {}).get('message', res.text)
             if "Limit 12000" in err_msg:
-                raise Exception("檔案文字量太大，超過 API 單次限制。請嘗試「清空草稿」並分批次上傳檔案。")
-            raise Exception(f"Groq API 錯誤: {err_msg}")
+                raise Exception("檔案文字量過大，觸發 API 限制。請嘗試分兩次上傳不同頁面。")
+            raise Exception(f"Groq 錯誤: {err_msg}")
             
         raw_content = res.json()['choices'][0]['message']['content']
         
-        # 🌟 磁鐵解析法：強行萃取所有完整題目，無視廢話或斷尾
+        # 🌟 鋼鐵解析法
         parsed = []
         starts = [m.start() for m in re.finditer(r'\{\s*"(q|question|題目)"\s*:', raw_content)]
         
@@ -127,7 +127,7 @@ async def generate_quiz(files: List[UploadFile] = File(...)):
                         break
                         
         if not parsed:
-            raise Exception("AI 生成題目失敗，可能是內容太少無法出題，請重試一次。")
+            raise Exception("AI 生成題目失敗，請確認檔案內容或稍後再試。")
         
         conn = sqlite3.connect("quiz_data.db")
         old = conn.execute("SELECT data FROM temp_qs WHERE id=1").fetchone()
@@ -156,7 +156,6 @@ async def generate_quiz(files: List[UploadFile] = File(...)):
         conn.commit(); conn.close()
         return {"status": "ok", "count": len(combined)}
     except Exception as e: 
-        print(f"Groq 處理異常: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.delete("/admin/temp-clear")
