@@ -152,6 +152,21 @@ function AdminPanel() {
     fetchData();
   };
 
+  // 🌟 新增清空線上題庫功能
+  const clearFinal = async () => {
+    if (finalQs.length === 0) return alert("目前沒有發布的題庫！");
+    if (!window.confirm("⚠️ 警告：確定要清空線上題庫嗎？清空後夥伴將無法進行測驗！")) return;
+    
+    // 透過發布一個「空陣列」來達到清空的效果
+    await fetch(`${API_BASE}/admin/publish-questions`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify([]) 
+    });
+    alert("線上題庫已成功清空！");
+    fetchData();
+  };
+
   const clearRecords = async () => {
     if (window.confirm("⚠️ 警告：確定要清空所有成績紀錄嗎？此動作無法復原！")) {
       await fetch(`${API_BASE}/admin/records/clear`, { method: 'DELETE' });
@@ -198,7 +213,12 @@ function AdminPanel() {
           {loading && <p style={{ color: '#e67e22', fontWeight: 'bold' }}>🚀 AI 正在閱讀並產題中，請稍候...</p>}
           
           <div style={{ marginTop: '20px', border: '1px solid #bdc3c7', borderRadius: '10px', padding: '15px', backgroundColor: '#fff' }}>
-            <h4 style={{ margin: '0 0 10px 0', color: '#2c3e50' }}>💡 目前線上發布的題庫 ({finalQs.length} 題)</h4>
+            {/* 🌟 加入清空線上題庫的按鈕 */}
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
+              <h4 style={{ margin: 0, color: '#2c3e50' }}>💡 目前線上發布的題庫 ({finalQs.length} 題)</h4>
+              <button onClick={clearFinal} style={{ ...miniBtnStyle, color: '#e74c3c', borderColor: '#e74c3c' }}>🗑️ 清空線上題庫</button>
+            </div>
+            
             <div style={{ height: '200px', overflowY: 'auto', fontSize: '13px' }}>
               {finalQs.map((q, i) => <div key={i} style={{ padding: '5px 0', borderBottom: '1px solid #f1f1f1' }}>{q.id}. {q.q}</div>)}
               {finalQs.length === 0 && <p style={{ color: '#95a5a6' }}>尚未發布題目</p>}
