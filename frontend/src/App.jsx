@@ -1,6 +1,5 @@
 import React, { useState, useEffect } from 'react';
 
-// 🌟 保證乾淨的 API 網址，沒有多餘括號
 const API_BASE = "https://sop-quiz-api.onrender.com"; 
 
 function App() {
@@ -11,7 +10,6 @@ function App() {
   const [answers, setAnswers] = useState({});
   const [score, setScore] = useState(0);
 
-  // 🌟 動態更改網頁分頁標題 (前端員工視角)
   useEffect(() => {
     if (!isAdmin) {
       document.title = "再睡五分鐘考核系統";
@@ -20,6 +18,14 @@ function App() {
 
   const startQuiz = async () => {
     if (!user.name || !user.emp_id) return alert("請填寫姓名與工號");
+    
+    // 🌟 中文姓名檢查器 (Regular Expression)
+    // 檢查字串是否「全部」都落在中文字元的編碼範圍內
+    const isAllChinese = /^[\u4E00-\u9FA5]+$/.test(user.name);
+    if (!isAllChinese) {
+      return alert("⚠️ 姓名欄位僅限輸入「繁體中文」，請勿輸入英文、數字、注音或符號！");
+    }
+
     try {
       const res = await fetch(`${API_BASE}/get-questions?emp_id=${user.emp_id}`);
       if (res.status === 403) return alert("此工號已完成考核！");
@@ -55,10 +61,9 @@ function App() {
     <div style={{ padding: '20px', maxWidth: '600px', margin: 'auto', fontFamily: 'sans-serif' }}>
       {view === 'login' && (
         <div style={{ textAlign: 'center', border: '2px solid #3498db', padding: '40px', borderRadius: '20px' }}>
-          {/* 🌟 移除表情符號 */}
           <h2 style={{ color: '#2c3e50' }}>再睡五分鐘考核系統</h2>
-          <input placeholder="您的姓名" onChange={e => setUser({...user, name: e.target.value})} style={inputStyle} /><br/>
-          <input placeholder="員工工號" onChange={e => setUser({...user, emp_id: e.target.value})} style={inputStyle} /><br/>
+          <input placeholder="您的姓名 (僅限中文)" onChange={e => setUser({...user, name: e.target.value.trim()})} style={inputStyle} /><br/>
+          <input placeholder="員工工號" onChange={e => setUser({...user, emp_id: e.target.value.trim()})} style={inputStyle} /><br/>
           <button onClick={startQuiz} style={btnStyle}>開始測驗 (隨機 20 題)</button>
         </div>
       )}
@@ -110,7 +115,6 @@ function AdminPanel() {
   };
 
   useEffect(() => { 
-    // 🌟 動態更改網頁分頁標題 (後端店長視角)
     document.title = "考核系統後端";
     fetchData(); 
   }, []);
@@ -152,12 +156,10 @@ function AdminPanel() {
     fetchData();
   };
 
-  // 🌟 新增清空線上題庫功能
   const clearFinal = async () => {
     if (finalQs.length === 0) return alert("目前沒有發布的題庫！");
     if (!window.confirm("⚠️ 警告：確定要清空線上題庫嗎？清空後夥伴將無法進行測驗！")) return;
     
-    // 透過發布一個「空陣列」來達到清空的效果
     await fetch(`${API_BASE}/admin/publish-questions`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -197,7 +199,6 @@ function AdminPanel() {
 
   return (
     <div style={{ padding: '30px', fontFamily: 'sans-serif', backgroundColor: '#f4f7f6', minHeight: '100vh' }}>
-      {/* 🌟 移除表情符號 */}
       <h1 style={{ color: '#2c3e50', textAlign: 'center' }}>考核系統後端</h1>
       
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '30px', marginTop: '30px' }}>
@@ -213,7 +214,6 @@ function AdminPanel() {
           {loading && <p style={{ color: '#e67e22', fontWeight: 'bold' }}>🚀 AI 正在閱讀並產題中，請稍候...</p>}
           
           <div style={{ marginTop: '20px', border: '1px solid #bdc3c7', borderRadius: '10px', padding: '15px', backgroundColor: '#fff' }}>
-            {/* 🌟 加入清空線上題庫的按鈕 */}
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
               <h4 style={{ margin: 0, color: '#2c3e50' }}>💡 目前線上發布的題庫 ({finalQs.length} 題)</h4>
               <button onClick={clearFinal} style={{ ...miniBtnStyle, color: '#e74c3c', borderColor: '#e74c3c' }}>🗑️ 清空線上題庫</button>
