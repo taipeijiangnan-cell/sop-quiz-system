@@ -60,13 +60,21 @@ function App() {
     setScore(finalScore);
     
     try {
-      await fetch(`${API_BASE}/submit`, {
+      const res = await fetch(`${API_BASE}/submit`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ user_name: user.name, emp_id: user.emp_id, score: finalScore, detail: detail })
       });
+      
+      // 🌟 新增：如果後端亮紅燈，強行把真正的錯誤原因抓出來
+      if (!res.ok) {
+        const errText = await res.text();
+        throw new Error(`伺服器拒絕儲存 (${res.status}): ${errText}`);
+      }
+      
     } catch (e) {
-      alert("⚠️ 網路不穩或伺服器休眠，成績未能上傳成功！\n但您仍可查看本次測驗分數，請截圖結果給店長紀錄。");
+      // 🌟 新增：把真實的錯誤代碼吐出來給我們看！
+      alert(`⚠️ 成績未能上傳成功！\n詳細錯誤：${e.message}\n\n但您仍可查看本次測驗分數，請截圖結果給店長紀錄。`);
     } finally {
       setView('result'); 
     }
