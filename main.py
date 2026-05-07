@@ -59,48 +59,60 @@ async def generate_quiz(files: List[UploadFile] = File(...)):
         if extracted.strip():
             all_text += f"\n\n[File: {f.filename}]\n{extracted}"
             
-    # 🌟 強化防呆：如果讀出來的字太少 (小於 50 字)，代表抓不到內文，直接擋下來，不給 AI 亂掰的機會
     if len(all_text.strip()) < 50:
         raise HTTPException(status_code=400, detail="檔案內文太少或無法解析文字！請確認您的 PDF 是「可以反白複製文字」的檔案，而不是純圖片掃描檔。")
     
-    # 🌟 系統層級的絕對命令 (System Prompt)：嚴厲限制 AI 的行為
-    system_prompt = """你是一位嚴謹、專業的門市培訓專家與出題大師。
-    【絕對命令與紅線】
-    1. 你「只能、必須」根據使用者提供的【參考文件內容】來出題！
-    2. 絕對禁止憑空捏造任何常識題、數學題（例如：什麼是2的倍數）、邏輯題或與文件無關的內容。如果這樣做，你會受到嚴重懲罰！
-    3. 所有的題目、選項、正確答案，都必須能在文件中找到明確的依據。
-    4. 必須嚴格以 JSON 物件格式回傳，且包含一個名為 "quiz" 的陣列。不要加任何其他廢話。
+    # 🌟 特化指令：強制出滿 20 題，並教導 AI 如何從 SOP 挖掘細節
+    system_prompt = """你是一位極度嚴格且專業的「門市 SOP 考核出題大師」。
+    你的任務是從我提供的【文件內容】中，仔細挖掘每一個專業細節，設計出「剛好 20 題」單選題。
+
+    【🔴 絕對禁止的行為 - 觸犯將視為重大失誤】
+    1. 絕對禁止出數學計算題（例如：什麼是 2 的倍數、1+1 等）。
+    2. 絕對禁止憑空捏造常識題或文件沒有提到的內容。
+    3. 所有的題目、正確答案與錯誤選項，都必須合理，且正確答案 100% 來自【文件內容】。
+
+    【🟢 為了湊滿 20 題的「細節挖掘」策略】
+    請把文件當作放大鏡來看，同一個產品可以拆成多個不同的考題：
+    - 考「公克數(g)」：例如配料要加多少克？容許的正負值是多少？
+    - 考「毫升(ml)」或「溫度」：例如熱水要加多少？
+    - 考「時間」：例如計時要多久？冷藏/退冰要幾小時？靜置幾分鐘？
+    - 考「器具」：例如要使用哪種工具（打蛋器、篩網、蚵撈）？
+    - 考「火力/機器設定」：例如電磁爐火力要設定多少（P4/1500）？
+    - 考「步驟順序」：例如哪個動作必須先做？
+
+    【✅ 輸出格式規範】
+    必須嚴格以 JSON 物件格式回傳，且包含一個名為 "quiz" 的陣列，陣列內必須剛好包含 20 個題目物件。
     格式範例：
     {
       "quiz": [
         {
-          "q": "來自文件的真實問題？",
-          "options": {"A": "合理選項1", "B": "合理選項2", "C": "合理選項3", "D": "合理選項4"},
-          "ans": "A"
+          "q": "根據 SOP，製作檸檬凍時，加入檸檬汁後需以火力 1500(P4) 煮至沸騰，隨後應計時多久即可關火？",
+          "options": {"A": "10秒", "B": "30秒", "C": "1分鐘", "D": "2分鐘"},
+          "ans": "B"
         }
       ]
     }"""
 
-    # 🌟 使用者提供的內容
-    user_prompt = f"請根據以下【參考文件內容】，設計出最多 20 題的繁體中文單選題。\n\n【參考文件內容開始】\n{all_text[:8000]}\n【參考文件內容結束】"
+    # 🌟 明確要求 20 題
+    user_prompt = f"請根據以下【文件內容】，徹底挖掘所有數字、步驟與器具細節，設計出「剛好 20 題」的繁體中文單選題。請務必出滿 20 題！\n\n【文件內容開始】\n{all_text[:8000]}\n【文件內容結束】"
     
-    url = "https://api.groq.com/openai/v1/chat/completions"
+    url = "https://api.com/v1/chat/completions".replace("api.com", "api.groq.com/openai")
     headers = {
         "Authorization": f"Bearer {GROQ_API_KEY}",
         "Content-Type": "application/json"
     }
     payload = {
-        "model": "llama-3.3-70b-versatile", # 🌟 升級為智商最高的 70B 大模型，理解力爆表
+        "model": "llama-3.3-70b-versatile",
         "messages": [
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": user_prompt}
         ],
-        "temperature": 0.1, # 🌟 溫度調到趨近於 0，強迫它變得像機器人一樣嚴謹，不准發揮任何創意
+        "temperature": 0.1, # 🌟 給一點點溫度(0.1)，讓它有微小的彈性可以換句話說來湊滿 20 題，但依然極度嚴謹
         "response_format": {"type": "json_object"}
     }
     
     try:
-        res = requests.post(url, headers=headers, json=payload, timeout=60)
+        res = requests.post(url, headers=headers, json=payload, timeout=90) # 20題需要較長時間，將 timeout 延長至 90 秒
         if res.status_code != 200:
             raise Exception(f"Groq API 錯誤: {res.text}")
             
@@ -127,7 +139,7 @@ async def generate_quiz(files: List[UploadFile] = File(...)):
         existing = json.loads(old[0]) if old else []
         
         new_qs = []
-        for x in parsed[:20]:
+        for x in parsed[:20]: # 擷取最多 20 題
             opts = {"A": "A", "B": "B", "C": "C", "D": "D"}
             raw_opts = x.get('options', {})
             if isinstance(raw_opts, dict):
