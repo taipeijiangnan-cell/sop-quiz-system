@@ -20,7 +20,9 @@ function App() {
     if (!chineseRegex.test(user.name)) return alert("姓名請輸入繁體中文！");
 
     try {
-      const res = await fetch(`${API_BASE}/get-questions?emp_id=${user.emp_id}`);
+      // 🌟 加入時間戳記，防止瀏覽器快取到舊的題庫
+      const ts = new Date().getTime();
+      const res = await fetch(`${API_BASE}/get-questions?emp_id=${user.emp_id}&t=${ts}`);
       if (res.status === 403) return alert("此工號已完成考核！");
       if (!res.ok) return alert("題庫尚未發布，請洽店長");
       const data = await res.json();
@@ -93,10 +95,12 @@ function AdminPanel() {
 
   const fetchData = async () => {
     try {
+      // 🌟 破除快取魔法：加上 t 參數，強迫瀏覽器每次重整都去後端抓最新的資料庫狀態
+      const ts = new Date().getTime();
       const [tRes, fRes, rRes] = await Promise.all([
-        fetch(`${API_BASE}/admin/temp-questions`),
-        fetch(`${API_BASE}/admin/current-final`),
-        fetch(`${API_BASE}/admin/records`)
+        fetch(`${API_BASE}/admin/temp-questions?t=${ts}`),
+        fetch(`${API_BASE}/admin/current-final?t=${ts}`),
+        fetch(`${API_BASE}/admin/records?t=${ts}`)
       ]);
       setTempQs(await tRes.json() || []);
       setFinalQs(await fRes.json() || []);
@@ -113,7 +117,7 @@ function AdminPanel() {
     try {
       const res = await fetch(`${API_BASE}/generate-quiz`, { method: 'POST', body: formData });
       if (res.ok) {
-        alert("✅ 題目已加入草稿！");
+        alert("✅ 題目已加入草稿！請記得滑到最下面按「正式發布」！");
         fetchData();
       } else {
         alert("❌ 生成失敗，可能是檔案格式不符，請再試一次。");
@@ -188,7 +192,6 @@ function AdminPanel() {
     e.target.value = null; 
   };
 
-  // 🌟 加入防呆機制：禁止發布空草稿
   const publish = async () => {
     if (tempQs.length === 0) {
       return alert("⚠️ 錯誤：草稿區目前是空的！\n請先上傳 SOP 或是匯入 JSON 後，再按正式發布。");
@@ -200,7 +203,7 @@ function AdminPanel() {
       body: JSON.stringify(tempQs)
     });
     alert("🚀 發布成功！夥伴現在可以使用新題庫測驗了。");
-    fetchData();
+    fetchData(); // 發布後立即重抓確保畫面更新
   };
 
   const clearTemp = async () => {
@@ -249,7 +252,6 @@ function AdminPanel() {
           <div style={{ marginTop: '20px', border: '1px solid #bdc3c7', borderRadius: '10px', padding: '15px', backgroundColor: '#fff' }}>
             <h4 style={{ margin: '0 0 10px 0', color: '#2c3e50' }}>💡 目前線上發布的題庫 ({finalQs.length} 題)</h4>
             <div style={{ height: '200px', overflowY: 'auto', fontSize: '13px' }}>
-              {/* 🌟 加入明顯的無題庫警告 */}
               {finalQs && finalQs.length > 0 ? (
                 finalQs.map((q, i) => <div key={i} style={{ padding: '5px 0', borderBottom: '1px solid #f1f1f1' }}>{q.id}. {q.q}</div>)
               ) : (
@@ -299,7 +301,6 @@ function AdminPanel() {
                   </div>
                 ))}
               </div>
-              {/* 🌟 並排的儲存與發布按鈕 */}
               <div style={{ display: 'flex', gap: '10px' }}>
                 <button onClick={saveTemp} style={{ ...btnStyle, backgroundColor: '#2980b9', flex: 1, margin: 0 }}>💾 儲存草稿</button>
                 <button onClick={publish} style={{ ...btnStyle, backgroundColor: '#27ae60', flex: 1, margin: 0 }}>🚀 正式發布 (推送到線上)</button>
