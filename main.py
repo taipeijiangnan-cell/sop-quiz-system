@@ -94,7 +94,6 @@ async def generate_quiz(files: List[UploadFile] = File(...)):
         return {"status": "ok", "count": len(combined)}
     except Exception as e: raise HTTPException(status_code=500, detail=str(e))
 
-# 🌟 新增：手動儲存草稿接口
 @app.post("/admin/save-temp")
 async def save_temp(data: List[dict]):
     conn = sqlite3.connect("quiz_data.db")
@@ -109,11 +108,17 @@ async def get_temp():
     conn.close()
     return json.loads(data[0]) if data else []
 
+@app.delete("/admin/temp-clear")
+async def clear_temp():
+    conn = sqlite3.connect("quiz_data.db")
+    conn.execute("DELETE FROM temp_qs")
+    conn.commit(); conn.close()
+    return {"status": "ok"}
+
 @app.post("/admin/publish-questions")
 async def publish(data: List[dict]):
     try:
         conn = sqlite3.connect("quiz_data.db")
-        # 🌟 改用 INSERT OR REPLACE 強制覆蓋，避免刪除後寫入失敗的空窗期
         conn.execute("INSERT OR REPLACE INTO final_qs (id, data) VALUES (1, ?)", (json.dumps(data),))
         conn.commit()
     except Exception as e:
@@ -122,12 +127,48 @@ async def publish(data: List[dict]):
         conn.close()
     return {"status": "ok"}
 
+# 🌟 剛剛不小心被刪除的「抓取線上題庫」通道！
+@app.get("/get-questions")
+async def get_qs(emp_id: str):
+    conn = sqlite3.connect("quiz_data.db")
+    if conn.execute("SELECT score FROM records WHERE emp_id=?", (emp_id,)).fetchone():
+        conn.close(); raise HTTPException(status_code=403, detail="此工號已完成考核")
+    data = conn.execute("SELECT data FROM final_qs WHERE id=1").fetchone()
+    conn.close()
+    if not data: raise HTTPException(status_code=400, detail="題庫未就緒")
+    all_qs = json.loads(data[0])
+    return random.sample(all_qs, min(20, len(all_qs)))
+
+# 🌟 剛剛不小心被刪除的「前台交卷」通道！
+@app.post("/submit")
+async def submit(data: dict):
+    name, emp_id, score, detail = data.get("user_name"), data.get("emp_id"), data.get("score"), data.get("detail")
+    conn = sqlite3.connect("quiz_data.db")
+    conn.execute("INSERT OR REPLACE INTO records (emp_id, name, score, detail) VALUES (?, ?, ?, ?)", (emp_id, name, score, json.dumps(detail)))
+    conn.commit(); conn.close()
+    return {"status": "ok"}
+
+# 🌟 剛剛不小心被刪除的「後台顯示線上題庫」通道！
+@app.get("/admin/current-final")
+async def get_final():
+    conn = sqlite3.connect("quiz_data.db")
+    data = conn.execute("SELECT data FROM final_qs WHERE id=1").fetchone()
+    conn.close()
+    return json.loads(data[0]) if data else []
+
 @app.get("/admin/records")
 async def get_recs():
-    conn = sqlite3.connect("quiz_data.db")
-    recs = conn.execute("SELECT emp_id, name, score, detail FROM records").fetchall()
-    conn.close()
-    return [{"emp_id": r[0], "name": r[1], "score": r[2], "detail": json.loads(r[3])} for r in recs]
+    try:
+        conn = sqlite3.connect("quiz_data.db")
+        recs = conn.execute("SELECT emp_id, name, score, detail FROM records").fetchall()
+        conn.close()
+        result = []
+        for r in recs:
+            try: det = json.loads(r[3]) if r[3] else []
+            except: det = []
+            result.append({"emp_id": r[0], "name": r[1], "score": r[2], "detail": det})
+        return result
+    except: return []
 
 @app.delete("/admin/records/clear")
 async def clear_recs():
