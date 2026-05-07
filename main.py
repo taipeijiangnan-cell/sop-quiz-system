@@ -59,31 +59,30 @@ async def generate_quiz(files: List[UploadFile] = File(...)):
         if extracted.strip():
             all_text += f"\n\n[File: {f.filename}]\n{extracted}"
             
-    # 🌟 防呆：如果讀出來完全沒有字 (例如上傳了純圖片的PDF)
-    if not all_text.strip():
-        raise HTTPException(status_code=400, detail="無法從檔案中讀取出任何文字！請確認您的 PDF 不是「純圖片掃描檔」，建議改用 Word 檔或含有純文字的 PDF 上傳。")
+    # 🌟 強化防呆：如果讀出來的字太少 (小於 50 字)，代表抓不到內文，直接擋下來，不給 AI 亂掰的機會
+    if len(all_text.strip()) < 50:
+        raise HTTPException(status_code=400, detail="檔案內文太少或無法解析文字！請確認您的 PDF 是「可以反白複製文字」的檔案，而不是純圖片掃描檔。")
     
-    # 🌟 強化提示詞：用嚴厲的語氣限制 AI 絕對不能亂出題
-    prompt = f"""你是一個嚴格的門市培訓專家。
-    【任務指令】
-    請「完全根據」下方提供的【文件內容】，設計出最多 20 題的繁體中文單選題。
-    嚴格禁止：絕對不可以自己編造與文件無關的常識題或數學題！所有的題目與答案都必須能從文件中找到依據。
-
-    【輸出格式要求】
-    必須嚴格以 JSON 物件格式回傳，且包含一個名為 "quiz" 的陣列！不要加上任何 Markdown 標記或引言。
-    {{
+    # 🌟 系統層級的絕對命令 (System Prompt)：嚴厲限制 AI 的行為
+    system_prompt = """你是一位嚴謹、專業的門市培訓專家與出題大師。
+    【絕對命令與紅線】
+    1. 你「只能、必須」根據使用者提供的【參考文件內容】來出題！
+    2. 絕對禁止憑空捏造任何常識題、數學題（例如：什麼是2的倍數）、邏輯題或與文件無關的內容。如果這樣做，你會受到嚴重懲罰！
+    3. 所有的題目、選項、正確答案，都必須能在文件中找到明確的依據。
+    4. 必須嚴格以 JSON 物件格式回傳，且包含一個名為 "quiz" 的陣列。不要加任何其他廢話。
+    格式範例：
+    {
       "quiz": [
-        {{
-          "q": "<在此填入根據文件設計的真實題目>",
-          "options": {{"A": "<選項內容>", "B": "<選項內容>", "C": "<選項內容>", "D": "<選項內容>"}},
+        {
+          "q": "來自文件的真實問題？",
+          "options": {"A": "合理選項1", "B": "合理選項2", "C": "合理選項3", "D": "合理選項4"},
           "ans": "A"
-        }}
+        }
       ]
-    }}
+    }"""
 
-    【文件內容開始】
-    {all_text[:8000]}
-    【文件內容結束】"""
+    # 🌟 使用者提供的內容
+    user_prompt = f"請根據以下【參考文件內容】，設計出最多 20 題的繁體中文單選題。\n\n【參考文件內容開始】\n{all_text[:8000]}\n【參考文件內容結束】"
     
     url = "https://api.groq.com/openai/v1/chat/completions"
     headers = {
@@ -91,9 +90,12 @@ async def generate_quiz(files: List[UploadFile] = File(...)):
         "Content-Type": "application/json"
     }
     payload = {
-        "model": "llama-3.1-8b-instant",
-        "messages": [{"role": "user", "content": prompt}],
-        "temperature": 0.2, # 🌟 降低溫度，強迫 AI 只能照本宣科，不准發揮創意
+        "model": "llama-3.3-70b-versatile", # 🌟 升級為智商最高的 70B 大模型，理解力爆表
+        "messages": [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_prompt}
+        ],
+        "temperature": 0.1, # 🌟 溫度調到趨近於 0，強迫它變得像機器人一樣嚴謹，不准發揮任何創意
         "response_format": {"type": "json_object"}
     }
     
