@@ -11,6 +11,13 @@ function App() {
   const [answers, setAnswers] = useState({});
   const [score, setScore] = useState(0);
 
+  // 🌟 動態更改網頁分頁標題 (前端員工視角)
+  useEffect(() => {
+    if (!isAdmin) {
+      document.title = "🦥 再睡五分鐘考核系統";
+    }
+  }, [isAdmin]);
+
   const startQuiz = async () => {
     if (!user.name || !user.emp_id) return alert("請填寫姓名與工號");
     try {
@@ -48,7 +55,8 @@ function App() {
     <div style={{ padding: '20px', maxWidth: '600px', margin: 'auto', fontFamily: 'sans-serif' }}>
       {view === 'login' && (
         <div style={{ textAlign: 'center', border: '2px solid #3498db', padding: '40px', borderRadius: '20px' }}>
-          <h2 style={{ color: '#2c3e50' }}>🏢 門市 SOP 考核系統</h2>
+          {/* 🌟 修改為再睡五分鐘品牌名稱與 Logo */}
+          <h2 style={{ color: '#2c3e50' }}>🦥 再睡五分鐘考核系統</h2>
           <input placeholder="您的姓名" onChange={e => setUser({...user, name: e.target.value})} style={inputStyle} /><br/>
           <input placeholder="員工工號" onChange={e => setUser({...user, emp_id: e.target.value})} style={inputStyle} /><br/>
           <button onClick={startQuiz} style={btnStyle}>開始測驗 (隨機 20 題)</button>
@@ -101,7 +109,11 @@ function AdminPanel() {
     } catch (e) { console.error("資料載入失敗，等待伺服器喚醒中..."); }
   };
 
-  useEffect(() => { fetchData(); }, []);
+  useEffect(() => { 
+    // 🌟 動態更改網頁分頁標題 (後端店長視角)
+    document.title = "🛡️ 考核系統後端";
+    fetchData(); 
+  }, []);
 
   const handleUpload = async (e) => {
     setLoading(true);
@@ -113,13 +125,11 @@ function AdminPanel() {
         alert("✅ 題目已成功加入草稿區！");
         fetchData();
       } else {
-        // 🌟 防呆：精準顯示後端回傳的錯誤原因，不再只顯示 500
         const errData = await res.json();
         alert(`❌ 生成失敗: ${errData.detail}\n請稍後再試。`);
       }
     } catch (e) { alert("連線超時，請稍後刷新網頁。"); }
     setLoading(false);
-    // 重設 input file 讓同一個檔案可以重複選取上傳
     e.target.value = null; 
   };
 
@@ -149,18 +159,11 @@ function AdminPanel() {
     }
   };
 
-  // 🌟 匯出 CSV 功能
   const exportToCSV = () => {
     if (records.length === 0) return alert("目前沒有成績紀錄可以匯出！");
-    
-    // 加入 BOM 以支援 Excel 顯示中文 UTF-8
     let csvContent = "data:text/csv;charset=utf-8,\uFEFF"; 
     csvContent += "工號,姓名,分數\n";
-
-    records.forEach(r => {
-      csvContent += `${r.emp_id},${r.name},${r.score}\n`;
-    });
-
+    records.forEach(r => { csvContent += `${r.emp_id},${r.name},${r.score}\n`; });
     const encodedUri = encodeURI(csvContent);
     const link = document.createElement("a");
     link.setAttribute("href", encodedUri);
@@ -170,21 +173,19 @@ function AdminPanel() {
     document.body.removeChild(link);
   };
 
-  // 更新草稿區的單一欄位
   const updateDraft = (id, field, value) => {
     setTempQs(tempQs.map(q => q.id === id ? { ...q, [field]: value } : q));
   };
-  // 更新草稿區的特定選項 (A, B, C, D)
   const updateOption = (id, optKey, value) => {
     setTempQs(tempQs.map(q => q.id === id ? { ...q, options: { ...q.options, [optKey]: value } } : q));
   };
 
   return (
     <div style={{ padding: '30px', fontFamily: 'sans-serif', backgroundColor: '#f4f7f6', minHeight: '100vh' }}>
-      <h1 style={{ color: '#2c3e50', textAlign: 'center' }}>🛡️ 店長後台管理中心</h1>
+      {/* 🌟 修改為後端標題名稱 */}
+      <h1 style={{ color: '#2c3e50', textAlign: 'center' }}>🛡️ 考核系統後端</h1>
       
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '30px', marginTop: '30px' }}>
-        {/* 題庫區 */}
         <div style={cardStyle}>
           <h3>📚 題庫與出題</h3>
           <div style={{ display: 'flex', gap: '10px', marginBottom: '10px' }}>
@@ -204,7 +205,6 @@ function AdminPanel() {
             </div>
           </div>
 
-          {/* 可編輯草稿區 */}
           {tempQs.length > 0 && (
             <div style={{ marginTop: '20px', padding: '15px', backgroundColor: '#fff3cd', borderRadius: '10px' }}>
               <h4 style={{ margin: '0 0 10px 0' }}>🆕 準備發布的草稿 ({tempQs.length} 題) - <span style={{color: '#d35400'}}>可直接點擊框框修改</span></h4>
@@ -213,16 +213,12 @@ function AdminPanel() {
                 {tempQs.map((q) => (
                   <div key={q.id} style={{ borderBottom: '2px solid #ddd', paddingBottom: '15px', marginBottom: '15px' }}>
                     <div style={{ fontWeight: 'bold', marginBottom: '5px', color: '#2c3e50' }}>第 {q.id} 題：</div>
-                    
-                    {/* 編輯題目 */}
                     <textarea 
                       value={q.q} 
                       onChange={(e) => updateDraft(q.id, 'q', e.target.value)} 
                       style={{ width: '100%', padding: '10px', marginBottom: '10px', borderRadius: '5px', border: '1px solid #ccc', boxSizing: 'border-box', fontFamily: 'inherit' }}
                       rows="2"
                     />
-                    
-                    {/* 編輯選項 */}
                     <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
                       {['A', 'B', 'C', 'D'].map(opt => (
                         <div key={opt} style={{ display: 'flex', alignItems: 'center' }}>
@@ -235,8 +231,6 @@ function AdminPanel() {
                         </div>
                       ))}
                     </div>
-                    
-                    {/* 編輯正確答案 */}
                     <div style={{ marginTop: '12px', fontWeight: 'bold', color: '#27ae60', display: 'flex', alignItems: 'center' }}>
                       正確答案：
                       <select 
@@ -258,9 +252,7 @@ function AdminPanel() {
           )}
         </div>
 
-        {/* 成績區 */}
         <div style={cardStyle}>
-          {/* 🌟 重新設計排版，確保匯出和清空按鈕非常明顯 */}
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '15px', backgroundColor: '#ecf0f1', padding: '15px', borderRadius: '10px' }}>
             <h3 style={{ margin: 0, color: '#2c3e50' }}>📈 夥伴成績紀錄</h3>
             <div>
@@ -291,7 +283,6 @@ function AdminPanel() {
         </div>
       </div>
 
-      {/* 詳細作答報告彈窗 */}
       {showDetail && (
         <div style={modalOverlayStyle}>
           <div style={modalStyle}>
@@ -314,7 +305,6 @@ function AdminPanel() {
   );
 }
 
-// 共用樣式
 const inputStyle = { padding: '12px', margin: '10px 0', width: '100%', borderRadius: '8px', border: '1px solid #bdc3c7', boxSizing: 'border-box' };
 const btnStyle = { padding: '12px 24px', borderRadius: '8px', border: 'none', backgroundColor: '#3498db', color: 'white', fontWeight: 'bold', cursor: 'pointer' };
 const qBoxStyle = { marginBottom: '25px', padding: '20px', backgroundColor: '#f9f9f9', borderRadius: '12px', borderLeft: '5px solid #3498db' };
