@@ -63,12 +63,10 @@ async def generate_quiz(files: List[UploadFile] = File(...)):
     範例：[ {{"q": "題目", "options": {{"A": "選項A", "B": "選項B", "C": "選項C", "D": "選項D"}}, "ans": "A"}} ]
     內容：{all_text[:5000]}"""
     
-    # 🌟 終極引擎：把 Google 所有的標準模型輪流敲門測一遍
+    # 🌟 2026年最新引擎：Google 淘汰了舊版，這裡我們使用官方最新的 2.5 和 2.0 世代模型
     models_to_test = [
-        "gemini-1.5-flash",
-        "gemini-1.5-flash-latest",
-        "gemini-1.0-pro",
-        "gemini-pro"
+        "gemini-2.5-flash",
+        "gemini-2.0-flash"
     ]
     
     success = False
@@ -92,11 +90,10 @@ async def generate_quiz(files: List[UploadFile] = File(...)):
             print(f"❌ 連線失敗: {last_err_detail}")
 
     if not success:
-        # 🌟 照妖鏡：顯示目前伺服器真正在用的金鑰前6碼
         safe_key = API_KEY[:6] + "..." if len(API_KEY) > 6 else "無效金鑰"
         raise HTTPException(
             status_code=500, 
-            detail=f"Google 拒絕了所有模型！請核對：目前伺服器讀到的金鑰開頭是「{safe_key}」。如果這不是新金鑰的開頭，代表 Render 沒有更新成功，請去 Render 點擊 Deploy latest commit！ (錯誤: {last_err_detail})"
+            detail=f"Google 拒絕了新版模型！金鑰前綴:「{safe_key}」。錯誤原因: {last_err_detail}"
         )
 
     try:
