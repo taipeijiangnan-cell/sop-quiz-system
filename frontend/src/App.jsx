@@ -301,6 +301,42 @@ function AdminPanel() {
     }
   };
 
+  // 🌟 新增：成績匯出成 CSV 功能
+  const exportRecordsToCSV = () => {
+    if (records.length === 0) return alert("目前沒有任何成績可以匯出喔！");
+
+    // 設定欄位標題
+    const headers = ["工號", "姓名", "分數", "作答詳情摘要"];
+
+    // 處理每一筆資料
+    const csvRows = records.map(r => {
+      // 提取作答詳情： [O] 題目... 或 [X] 題目...
+      const detailStr = r.detail.map(d => `[${d.isCorrect ? 'O' : 'X'}] ${d.q} (答:${d.userAns})`).join(" | ");
+      
+      // 用雙引號包覆欄位，避免內部有逗號或換行破壞 CSV 格式
+      return [
+        `"${r.emp_id}"`,
+        `"${r.name}"`,
+        `"${r.score}"`,
+        `"${detailStr.replace(/"/g, '""')}"`
+      ].join(",");
+    });
+
+    // 組合文字，前面加上 \uFEFF 是為了讓 Excel 開啟時認得 UTF-8 中文編碼，避免亂碼
+    const csvContent = "\uFEFF" + headers.join(",") + "\n" + csvRows.join("\n");
+
+    // 觸發下載
+    const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
+    const link = document.createElement("a");
+    link.href = URL.createObjectURL(blob);
+    // 檔名加上今天的日期
+    const dateStr = new Date().toISOString().split('T')[0].replace(/-/g, '');
+    link.download = `夥伴考核成績_${dateStr}.csv`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
   const updateDraft = (id, field, value) => {
     setTempQs(tempQs.map(q => q.id === id ? { ...q, [field]: value } : q));
   };
@@ -308,10 +344,9 @@ function AdminPanel() {
     setTempQs(tempQs.map(q => q.id === id ? { ...q, options: { ...q.options, [optKey]: value } } : q));
   };
 
-  // 🌟 線上題庫專屬功能：開始編輯、儲存修改、直接刪除單題
   const startEditingFinal = (q) => {
     setEditingFinalId(q.id);
-    setEditingFinalData(JSON.parse(JSON.stringify(q))); // 深拷貝防止直接污染原始資料
+    setEditingFinalData(JSON.parse(JSON.stringify(q)));
   };
 
   const saveEditingFinal = async () => {
@@ -496,7 +531,11 @@ function AdminPanel() {
                 {isRefreshing ? '🔄 刷新中...' : '🔄 刷新成績'}
               </button>
             </h3>
-            <button onClick={clearRecords} style={{ ...miniBtnStyle, color: '#e74c3c', borderColor: '#e74c3c' }}>🗑️ 清空成績</button>
+            {/* 🌟 這裡加入了 📥 匯出 CSV 按鈕 */}
+            <div>
+              <button onClick={exportRecordsToCSV} style={{ ...miniBtnStyle, color: '#16a085', borderColor: '#16a085', marginRight: '10px' }}>📥 匯出 CSV</button>
+              <button onClick={clearRecords} style={{ ...miniBtnStyle, color: '#e74c3c', borderColor: '#e74c3c' }}>🗑️ 清空成績</button>
+            </div>
           </div>
 
           <table style={{ width: '100%', borderCollapse: 'collapse', marginTop: '10px' }}>
