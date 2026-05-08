@@ -9,7 +9,7 @@ function App() {
   const [questions, setQuestions] = useState([]);
   const [answers, setAnswers] = useState({});
   const [score, setScore] = useState(0);
-  const [timeLeft, setTimeLeft] = useState(600); // 10 分鐘計時器
+  const [timeLeft, setTimeLeft] = useState(600); // 🌟 預設時間改為 600 秒 (10分鐘)
 
   useEffect(() => {
     document.title = isAdmin ? "考核系統後端" : "再睡五分鐘考核系統";
@@ -27,8 +27,14 @@ function App() {
       if (res.status === 403) return alert("此工號已完成考核！");
       if (!res.ok) return alert("題庫尚未發布，請洽店長");
       const data = await res.json();
+      
+      // 🌟 新增防呆：如果線上題庫是 0 題，嚴格擋住不給考！
+      if (!data || data.length === 0) {
+        return alert("⚠️ 目前線上還沒有任何題目喔！\n請聯絡店長前往後台「正式發布」題庫後再進行測驗。");
+      }
+
       setQuestions(data);
-      setTimeLeft(600); 
+      setTimeLeft(600); // 🌟 每次開始測驗重置的時間改為 600 秒 (10分鐘)
       setView('quiz');
     } catch (e) { alert("系統連線失敗，請檢查網路。"); }
   };
@@ -320,7 +326,6 @@ function AdminPanel() {
       setFinalQs(newFinalQs);
       setEditingFinalId(null);
       setEditingFinalData(null);
-      // alert("✅ 線上題庫修改成功！"); // 為了流暢體驗，可以選擇不跳提示直接儲存
     } catch (e) {
       alert("修改失敗，請檢查網路連線。");
     }
@@ -373,7 +378,6 @@ function AdminPanel() {
               {finalQs && finalQs.length > 0 ? (
                 finalQs.map((q, i) => (
                   <div key={q.id} style={{ padding: '10px 5px', borderBottom: '1px solid #f1f1f1' }}>
-                    {/* 🌟 根據狀態切換為編輯模式或唯讀模式 */}
                     {editingFinalId === q.id ? (
                       <div style={{ padding: '10px', backgroundColor: '#e8f4f8', borderRadius: '8px' }}>
                         <div style={{ fontWeight: 'bold', marginBottom: '5px', color: '#2980b9' }}>✏️ 修改線上題目：</div>
