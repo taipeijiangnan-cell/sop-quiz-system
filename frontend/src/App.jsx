@@ -28,7 +28,7 @@ function App() {
       if (!res.ok) return alert("題庫尚未發布，請洽店長");
       const data = await res.json();
       setQuestions(data);
-      setTimeLeft(1200); 
+      setTimeLeft(600); 
       setView('quiz');
     } catch (e) { alert("系統連線失敗，請檢查網路。"); }
   };
