@@ -4,12 +4,17 @@ const API_BASE = "https://sop-quiz-api.onrender.com";
 
 function App() {
   const [isAdmin, setIsAdmin] = useState(window.location.pathname === '/admin');
+  
+  // 🌟 新增：店長後台專屬密碼鎖狀態
+  const [isAuthenticatedAdmin, setIsAuthenticatedAdmin] = useState(false);
+  const [adminPassword, setAdminPassword] = useState('');
+
   const [view, setView] = useState('login'); 
   const [user, setUser] = useState({ name: '', emp_id: '' });
   const [questions, setQuestions] = useState([]);
   const [answers, setAnswers] = useState({});
   const [score, setScore] = useState(0);
-  const [timeLeft, setTimeLeft] = useState(600); // 🌟 預設時間改為 600 秒 (10分鐘)
+  const [timeLeft, setTimeLeft] = useState(600); // 預設時間改為 600 秒 (10分鐘)
 
   useEffect(() => {
     document.title = isAdmin ? "考核系統後端" : "再睡五分鐘考核系統";
@@ -28,13 +33,13 @@ function App() {
       if (!res.ok) return alert("題庫尚未發布，請洽店長");
       const data = await res.json();
       
-      // 🌟 新增防呆：如果線上題庫是 0 題，嚴格擋住不給考！
+      // 防呆：如果線上題庫是 0 題，嚴格擋住不給考！
       if (!data || data.length === 0) {
         return alert("⚠️ 目前線上還沒有任何題目喔！\n請聯絡店長前往後台「正式發布」題庫後再進行測驗。");
       }
 
       setQuestions(data);
-      setTimeLeft(600); // 🌟 每次開始測驗重置的時間改為 600 秒 (10分鐘)
+      setTimeLeft(600); // 每次開始測驗重置的時間改為 600 秒 (10分鐘)
       setView('quiz');
     } catch (e) { alert("系統連線失敗，請檢查網路。"); }
   };
@@ -79,7 +84,43 @@ function App() {
     }
   };
 
-  if (isAdmin) return <AdminPanel />;
+  // 🌟 加入管理員密碼門檻
+  if (isAdmin) {
+    if (!isAuthenticatedAdmin) {
+      return (
+        <div style={{ padding: '20px', maxWidth: '400px', margin: 'auto', fontFamily: 'sans-serif', textAlign: 'center', marginTop: '100px' }}>
+          <div style={{ border: '2px solid #2c3e50', padding: '40px', borderRadius: '20px', backgroundColor: '#fff', boxShadow: '0 4px 10px rgba(0,0,0,0.1)' }}>
+            <h2 style={{ color: '#2c3e50', marginBottom: '20px' }}>🔒 店長後台登入</h2>
+            <input 
+              type="password" 
+              placeholder="請輸入店長密碼" 
+              value={adminPassword}
+              onChange={(e) => setAdminPassword(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') {
+                  // 🌟 預設密碼在這裡修改！目前是 55555
+                  if (adminPassword === '55555') setIsAuthenticatedAdmin(true);
+                  else alert("密碼錯誤！請重新輸入。");
+                }
+              }}
+              style={{...inputStyle, textAlign: 'center', letterSpacing: '5px', fontSize: '18px'}} 
+            />
+            <button 
+              onClick={() => {
+                // 🌟 預設密碼在這裡修改！目前是 55555
+                if (adminPassword === '55555') setIsAuthenticatedAdmin(true);
+                else alert("密碼錯誤！請重新輸入。");
+              }} 
+              style={{ ...btnStyle, width: '100%', marginTop: '20px', backgroundColor: '#2c3e50' }}
+            >
+              進入管理系統
+            </button>
+          </div>
+        </div>
+      );
+    }
+    return <AdminPanel />;
+  }
 
   return (
     <div style={{ padding: '20px', maxWidth: '600px', margin: 'auto', fontFamily: 'sans-serif' }}>
@@ -133,7 +174,7 @@ function AdminPanel() {
   const [showDetail, setShowDetail] = useState(null);
   const [isRefreshing, setIsRefreshing] = useState(false); 
 
-  // 🌟 線上題庫編輯專用狀態
+  // 線上題庫編輯專用狀態
   const [editingFinalId, setEditingFinalId] = useState(null);
   const [editingFinalData, setEditingFinalData] = useState(null);
 
@@ -301,19 +342,12 @@ function AdminPanel() {
     }
   };
 
-  // 🌟 新增：成績匯出成 CSV 功能
   const exportRecordsToCSV = () => {
     if (records.length === 0) return alert("目前沒有任何成績可以匯出喔！");
 
-    // 設定欄位標題
     const headers = ["工號", "姓名", "分數", "作答詳情摘要"];
-
-    // 處理每一筆資料
     const csvRows = records.map(r => {
-      // 提取作答詳情： [O] 題目... 或 [X] 題目...
       const detailStr = r.detail.map(d => `[${d.isCorrect ? 'O' : 'X'}] ${d.q} (答:${d.userAns})`).join(" | ");
-      
-      // 用雙引號包覆欄位，避免內部有逗號或換行破壞 CSV 格式
       return [
         `"${r.emp_id}"`,
         `"${r.name}"`,
@@ -322,14 +356,10 @@ function AdminPanel() {
       ].join(",");
     });
 
-    // 組合文字，前面加上 \uFEFF 是為了讓 Excel 開啟時認得 UTF-8 中文編碼，避免亂碼
     const csvContent = "\uFEFF" + headers.join(",") + "\n" + csvRows.join("\n");
-
-    // 觸發下載
     const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
     const link = document.createElement("a");
     link.href = URL.createObjectURL(blob);
-    // 檔名加上今天的日期
     const dateStr = new Date().toISOString().split('T')[0].replace(/-/g, '');
     link.download = `夥伴考核成績_${dateStr}.csv`;
     document.body.appendChild(link);
@@ -531,7 +561,6 @@ function AdminPanel() {
                 {isRefreshing ? '🔄 刷新中...' : '🔄 刷新成績'}
               </button>
             </h3>
-            {/* 🌟 這裡加入了 📥 匯出 CSV 按鈕 */}
             <div>
               <button onClick={exportRecordsToCSV} style={{ ...miniBtnStyle, color: '#16a085', borderColor: '#16a085', marginRight: '10px' }}>📥 匯出 CSV</button>
               <button onClick={clearRecords} style={{ ...miniBtnStyle, color: '#e74c3c', borderColor: '#e74c3c' }}>🗑️ 清空成績</button>
