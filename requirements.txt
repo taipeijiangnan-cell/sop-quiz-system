@@ -1,6 +1,7 @@
 fastapi
 uvicorn
+python-multipart
 pypdf
 python-docx
 requests
-python-multipart
+psycopg2-binary
