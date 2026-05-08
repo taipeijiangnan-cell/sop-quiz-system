@@ -9,7 +9,7 @@ function App() {
   const [questions, setQuestions] = useState([]);
   const [answers, setAnswers] = useState({});
   const [score, setScore] = useState(0);
-  const [timeLeft, setTimeLeft] = useState(1200); // 20 分鐘計時器
+  const [timeLeft, setTimeLeft] = useState(600); // 10 分鐘計時器
 
   useEffect(() => {
     document.title = isAdmin ? "考核系統後端" : "再睡五分鐘考核系統";
