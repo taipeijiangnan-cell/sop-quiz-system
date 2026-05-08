@@ -1,6 +1,7 @@
 from fastapi import FastAPI, HTTPException, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
-import json, io, pypdf, docx, requests, sqlite3, re, os, random
+import json, io, pypdf, docx, requests, re, os, random
+import psycopg2 # 🌟 升級：引入企業級 PostgreSQL 引擎
 from typing import List
 
 app = FastAPI(title="考核系統後端")
@@ -14,23 +15,30 @@ app.add_middleware(
 )
 
 GROQ_API_KEY = os.getenv("GROQ_API_KEY", "").strip()
+DATABASE_URL = os.getenv("DATABASE_URL", "").strip()
 
+# 🌟 新增：連線到雲端資料庫的函數
+def get_db():
+    if not DATABASE_URL:
+        raise Exception("遺失 DATABASE_URL 環境變數！請到 Render 後台設定。")
+    return psycopg2.connect(DATABASE_URL, sslmode='require')
+
+# 🌟 初始化雲端資料庫表格
 def init_db():
-    conn = sqlite3.connect("quiz_data.db")
-    cursor = conn.cursor()
-    cursor.execute("CREATE TABLE IF NOT EXISTS temp_qs (id INTEGER PRIMARY KEY, data TEXT)")
-    cursor.execute("CREATE TABLE IF NOT EXISTS final_qs (id INTEGER PRIMARY KEY, data TEXT)")
-    
-    # 🌟 自動升級舊版資料庫：如果發現是舊版(沒有 detail 欄位)，就砍掉重建
+    if not DATABASE_URL:
+        print("尚未設定 DATABASE_URL，等待設定...")
+        return
     try:
-        cursor.execute("SELECT detail FROM records LIMIT 1")
-    except sqlite3.OperationalError:
-        cursor.execute("DROP TABLE IF EXISTS records")
-        
-    # 確保成績紀錄的欄位完全正確
-    cursor.execute("CREATE TABLE IF NOT EXISTS records (emp_id TEXT PRIMARY KEY, name TEXT, score INTEGER, detail TEXT)")
-    conn.commit()
-    conn.close()
+        conn = get_db()
+        cursor = conn.cursor()
+        cursor.execute("CREATE TABLE IF NOT EXISTS temp_qs (id INTEGER PRIMARY KEY, data TEXT)")
+        cursor.execute("CREATE TABLE IF NOT EXISTS final_qs (id INTEGER PRIMARY KEY, data TEXT)")
+        cursor.execute("CREATE TABLE IF NOT EXISTS records (emp_id TEXT PRIMARY KEY, name TEXT, score INTEGER, detail TEXT)")
+        conn.commit()
+        conn.close()
+        print("✅ 雲端資料庫連線與初始化成功！")
+    except Exception as e:
+        print(f"資料庫初始化失敗: {e}")
 
 init_db()
 
@@ -122,8 +130,11 @@ async def generate_quiz(files: List[UploadFile] = File(...)):
         if not parsed:
             raise Exception("AI 生成題目失敗，請確認檔案內容或稍後再試。")
         
-        conn = sqlite3.connect("quiz_data.db")
-        old = conn.execute("SELECT data FROM temp_qs WHERE id=1").fetchone()
+        # 🌟 雲端資料庫讀取現有草稿
+        conn = get_db()
+        cursor = conn.cursor()
+        cursor.execute("SELECT data FROM temp_qs WHERE id=1")
+        old = cursor.fetchone()
         existing = json.loads(old[0]) if old else []
         
         new_qs = []
@@ -145,7 +156,11 @@ async def generate_quiz(files: List[UploadFile] = File(...)):
             })
         
         combined = existing + new_qs
-        conn.execute("INSERT OR REPLACE INTO temp_qs (id, data) VALUES (1, ?)", (json.dumps(combined),))
+        # 🌟 雲端資料庫存入合併後的草稿
+        cursor.execute(
+            "INSERT INTO temp_qs (id, data) VALUES (1, %s) ON CONFLICT (id) DO UPDATE SET data = EXCLUDED.data", 
+            (json.dumps(combined),)
+        )
         conn.commit(); conn.close()
         return {"status": "ok", "count": len(combined)}
     except Exception as e: 
@@ -153,16 +168,21 @@ async def generate_quiz(files: List[UploadFile] = File(...)):
 
 @app.delete("/admin/temp-clear")
 async def clear_temp():
-    conn = sqlite3.connect("quiz_data.db")
-    conn.execute("DELETE FROM temp_qs")
+    conn = get_db()
+    cursor = conn.cursor()
+    cursor.execute("DELETE FROM temp_qs")
     conn.commit(); conn.close()
     return {"status": "ok"}
 
 @app.post("/admin/save-temp")
 async def save_temp(data: List[dict]):
     try:
-        conn = sqlite3.connect("quiz_data.db")
-        conn.execute("INSERT OR REPLACE INTO temp_qs (id, data) VALUES (1, ?)", (json.dumps(data),))
+        conn = get_db()
+        cursor = conn.cursor()
+        cursor.execute(
+            "INSERT INTO temp_qs (id, data) VALUES (1, %s) ON CONFLICT (id) DO UPDATE SET data = EXCLUDED.data", 
+            (json.dumps(data),)
+        )
         conn.commit(); conn.close()
         return {"status": "ok"}
     except Exception as e:
@@ -170,16 +190,19 @@ async def save_temp(data: List[dict]):
 
 @app.get("/get-questions")
 async def get_qs(emp_id: str):
-    conn = sqlite3.connect("quiz_data.db")
-    if conn.execute("SELECT score FROM records WHERE emp_id=?", (emp_id,)).fetchone():
+    conn = get_db()
+    cursor = conn.cursor()
+    cursor.execute("SELECT score FROM records WHERE emp_id=%s", (emp_id,))
+    if cursor.fetchone():
         conn.close(); raise HTTPException(status_code=403, detail="此工號已完成考核")
-    data = conn.execute("SELECT data FROM final_qs WHERE id=1").fetchone()
+        
+    cursor.execute("SELECT data FROM final_qs WHERE id=1")
+    data = cursor.fetchone()
     conn.close()
     if not data: raise HTTPException(status_code=400, detail="題庫未就緒")
     all_qs = json.loads(data[0])
     return random.sample(all_qs, min(20, len(all_qs)))
 
-# 🌟 強化版交卷通道：確保欄位不會遺漏而崩潰
 @app.post("/submit")
 async def submit(data: dict):
     try:
@@ -188,8 +211,13 @@ async def submit(data: dict):
         score = data.get("score", 0)
         detail = data.get("detail", [])
         
-        conn = sqlite3.connect("quiz_data.db")
-        conn.execute("INSERT OR REPLACE INTO records (emp_id, name, score, detail) VALUES (?, ?, ?, ?)", (emp_id, name, score, json.dumps(detail)))
+        conn = get_db()
+        cursor = conn.cursor()
+        # 🌟 雲端資料庫成績寫入與防衝突機制
+        cursor.execute(
+            "INSERT INTO records (emp_id, name, score, detail) VALUES (%s, %s, %s, %s) ON CONFLICT (emp_id) DO UPDATE SET name = EXCLUDED.name, score = EXCLUDED.score, detail = EXCLUDED.detail", 
+            (emp_id, name, score, json.dumps(detail))
+        )
         conn.commit(); conn.close()
         return {"status": "ok"}
     except Exception as e:
@@ -198,24 +226,29 @@ async def submit(data: dict):
 
 @app.get("/admin/current-final")
 async def get_final():
-    conn = sqlite3.connect("quiz_data.db")
-    data = conn.execute("SELECT data FROM final_qs WHERE id=1").fetchone()
+    conn = get_db()
+    cursor = conn.cursor()
+    cursor.execute("SELECT data FROM final_qs WHERE id=1")
+    data = cursor.fetchone()
     conn.close()
     return json.loads(data[0]) if data else []
 
 @app.get("/admin/temp-questions")
 async def get_temp():
-    conn = sqlite3.connect("quiz_data.db")
-    data = conn.execute("SELECT data FROM temp_qs WHERE id=1").fetchone()
+    conn = get_db()
+    cursor = conn.cursor()
+    cursor.execute("SELECT data FROM temp_qs WHERE id=1")
+    data = cursor.fetchone()
     conn.close()
     return json.loads(data[0]) if data else []
 
 @app.post("/admin/publish-questions")
 async def publish(data: List[dict]):
     try:
-        conn = sqlite3.connect("quiz_data.db")
-        conn.execute("DELETE FROM final_qs")
-        conn.execute("INSERT INTO final_qs (id, data) VALUES (1, ?)", (json.dumps(data),))
+        conn = get_db()
+        cursor = conn.cursor()
+        cursor.execute("DELETE FROM final_qs") # 清空舊題庫
+        cursor.execute("INSERT INTO final_qs (id, data) VALUES (1, %s)", (json.dumps(data),))
         conn.commit(); conn.close()
         return {"status": "ok"}
     except Exception as e:
@@ -224,8 +257,10 @@ async def publish(data: List[dict]):
 @app.get("/admin/records")
 async def get_recs():
     try:
-        conn = sqlite3.connect("quiz_data.db")
-        recs = conn.execute("SELECT emp_id, name, score, detail FROM records").fetchall()
+        conn = get_db()
+        cursor = conn.cursor()
+        cursor.execute("SELECT emp_id, name, score, detail FROM records")
+        recs = cursor.fetchall()
         conn.close()
         result = []
         for r in recs:
@@ -237,7 +272,8 @@ async def get_recs():
 
 @app.delete("/admin/records/clear")
 async def clear_recs():
-    conn = sqlite3.connect("quiz_data.db")
-    conn.execute("DELETE FROM records")
+    conn = get_db()
+    cursor = conn.cursor()
+    cursor.execute("DELETE FROM records")
     conn.commit(); conn.close()
     return {"status": "ok"}
