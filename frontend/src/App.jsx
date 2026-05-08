@@ -9,7 +9,7 @@ function App() {
   const [questions, setQuestions] = useState([]);
   const [answers, setAnswers] = useState({});
   const [score, setScore] = useState(0);
-  const [timeLeft, setTimeLeft] = useState(1200);
+  const [timeLeft, setTimeLeft] = useState(1200); // 20 分鐘計時器
 
   useEffect(() => {
     document.title = isAdmin ? "考核系統後端" : "再睡五分鐘考核系統";
@@ -17,11 +17,12 @@ function App() {
 
   const startQuiz = async () => {
     if (!user.name || !user.emp_id) return alert("請填寫姓名與工號");
+    // 嚴格中文姓名驗證
     const chineseRegex = /^[\u4E00-\u9FA5]+$/;
     if (!chineseRegex.test(user.name)) return alert("姓名請輸入繁體中文！");
 
     try {
-      const ts = new Date().getTime();
+      const ts = new Date().getTime(); // 破除快取
       const res = await fetch(`${API_BASE}/get-questions?emp_id=${user.emp_id}&t=${ts}`);
       if (res.status === 403) return alert("此工號已完成考核！");
       if (!res.ok) return alert("題庫尚未發布，請洽店長");
@@ -124,8 +125,11 @@ function AdminPanel() {
   const [records, setRecords] = useState([]);
   const [loading, setLoading] = useState(false);
   const [showDetail, setShowDetail] = useState(null);
-  // 🌟 新增：用來顯示「正在刷新中」的小提示狀態
   const [isRefreshing, setIsRefreshing] = useState(false); 
+
+  // 🌟 線上題庫編輯專用狀態
+  const [editingFinalId, setEditingFinalId] = useState(null);
+  const [editingFinalData, setEditingFinalData] = useState(null);
 
   const fetchData = async (showToast = false) => {
     try {
@@ -141,7 +145,7 @@ function AdminPanel() {
       setRecords(await rRes.json() || []);
       
       if(showToast) {
-        setTimeout(() => setIsRefreshing(false), 800); // 讓刷新動畫跑一下比較有感
+        setTimeout(() => setIsRefreshing(false), 800); 
       }
     } catch (e) { 
       console.error("資料載入失敗"); 
@@ -255,38 +259,26 @@ function AdminPanel() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(tempQs)
       });
-      
-      if (!res.ok) {
-        const errText = await res.text();
-        throw new Error(`伺服器拒絕儲存 (${res.status}): ${errText}`);
-      }
-      
+      if (!res.ok) throw new Error("儲存失敗");
       alert("🚀 發布成功！夥伴現在可以使用新題庫測驗了。");
       fetchData(); 
     } catch (error) {
-      alert(`❌ 發布失敗！\n系統沒有成功儲存，請截圖此錯誤檢查：\n${error.message}`);
+      alert(`❌ 發布失敗！請檢查網路。`);
     }
   };
 
   const clearFinal = async () => {
     if (finalQs.length === 0) return alert("目前沒有發布的題庫！");
     if (!window.confirm("⚠️ 警告：確定要清空線上題庫嗎？清空後夥伴將無法進行測驗！")) return;
-    
     try {
-      const res = await fetch(`${API_BASE}/admin/publish-questions`, {
+      await fetch(`${API_BASE}/admin/publish-questions`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify([]) 
       });
-      if (!res.ok) {
-        const errText = await res.text();
-        throw new Error(`伺服器拒絕儲存 (${res.status}): ${errText}`);
-      }
       alert("線上題庫已成功清空！");
       fetchData();
-    } catch (error) {
-      alert(`❌ 清空失敗！\n${error.message}`);
-    }
+    } catch (error) { alert(`❌ 清空失敗！`); }
   };
 
   const clearTemp = async () => {
@@ -308,6 +300,45 @@ function AdminPanel() {
   };
   const updateOption = (id, optKey, value) => {
     setTempQs(tempQs.map(q => q.id === id ? { ...q, options: { ...q.options, [optKey]: value } } : q));
+  };
+
+  // 🌟 線上題庫專屬功能：開始編輯、儲存修改、直接刪除單題
+  const startEditingFinal = (q) => {
+    setEditingFinalId(q.id);
+    setEditingFinalData(JSON.parse(JSON.stringify(q))); // 深拷貝防止直接污染原始資料
+  };
+
+  const saveEditingFinal = async () => {
+    const newFinalQs = finalQs.map(q => q.id === editingFinalId ? editingFinalData : q);
+    try {
+      const res = await fetch(`${API_BASE}/admin/publish-questions`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(newFinalQs)
+      });
+      if (!res.ok) throw new Error("儲存失敗");
+      setFinalQs(newFinalQs);
+      setEditingFinalId(null);
+      setEditingFinalData(null);
+      // alert("✅ 線上題庫修改成功！"); // 為了流暢體驗，可以選擇不跳提示直接儲存
+    } catch (e) {
+      alert("修改失敗，請檢查網路連線。");
+    }
+  };
+
+  const deleteFinalQuestion = async (id) => {
+    if (!window.confirm("⚠️ 確定要從線上題庫刪除這題嗎？\n(夥伴將立刻考不到這題)")) return;
+    const newFinalQs = finalQs.filter(q => q.id !== id);
+    try {
+      await fetch(`${API_BASE}/admin/publish-questions`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(newFinalQs)
+      });
+      setFinalQs(newFinalQs);
+    } catch (e) {
+      alert("刪除失敗，請檢查網路連線。");
+    }
   };
 
   return (
@@ -332,14 +363,67 @@ function AdminPanel() {
           </div>
           {loading && <p style={{ color: '#e67e22', fontWeight: 'bold' }}>🚀 AI 正在閱讀並產題中，請稍候...</p>}
           
-          <div style={{ marginTop: '20px', border: '1px solid #bdc3c7', borderRadius: '10px', padding: '15px', backgroundColor: '#fff' }}>
+          <div style={{ marginTop: '20px', border: '2px solid #27ae60', borderRadius: '10px', padding: '15px', backgroundColor: '#fff' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
-              <h4 style={{ margin: 0, color: '#2c3e50' }}>💡 目前線上發布的題庫 ({finalQs.length} 題)</h4>
+              <h4 style={{ margin: 0, color: '#27ae60' }}>💡 目前線上發布的題庫 ({finalQs.length} 題)</h4>
               <button onClick={clearFinal} style={{ ...miniBtnStyle, color: '#e74c3c', borderColor: '#e74c3c' }}>🚫 清空線上題庫</button>
             </div>
-            <div style={{ height: '200px', overflowY: 'auto', fontSize: '13px' }}>
+            
+            <div style={{ height: '250px', overflowY: 'auto', fontSize: '13px' }}>
               {finalQs && finalQs.length > 0 ? (
-                finalQs.map((q, i) => <div key={i} style={{ padding: '5px 0', borderBottom: '1px solid #f1f1f1' }}>{q.id}. {q.q}</div>)
+                finalQs.map((q, i) => (
+                  <div key={q.id} style={{ padding: '10px 5px', borderBottom: '1px solid #f1f1f1' }}>
+                    {/* 🌟 根據狀態切換為編輯模式或唯讀模式 */}
+                    {editingFinalId === q.id ? (
+                      <div style={{ padding: '10px', backgroundColor: '#e8f4f8', borderRadius: '8px' }}>
+                        <div style={{ fontWeight: 'bold', marginBottom: '5px', color: '#2980b9' }}>✏️ 修改線上題目：</div>
+                        <textarea 
+                          value={editingFinalData.q} 
+                          onChange={(e) => setEditingFinalData({ ...editingFinalData, q: e.target.value })} 
+                          style={{ width: '100%', padding: '8px', marginBottom: '10px', borderRadius: '5px', border: '1px solid #ccc', boxSizing: 'border-box' }}
+                        />
+                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
+                          {['A', 'B', 'C', 'D'].map(opt => (
+                            <div key={opt} style={{ display: 'flex', alignItems: 'center' }}>
+                              <span style={{ marginRight: '5px', fontWeight: 'bold' }}>{opt}.</span>
+                              <input 
+                                value={editingFinalData.options[opt] || ""} 
+                                onChange={(e) => setEditingFinalData({ ...editingFinalData, options: { ...editingFinalData.options, [opt]: e.target.value } })} 
+                                style={{ flex: 1, padding: '6px', borderRadius: '4px', border: '1px solid #ccc' }}
+                              />
+                            </div>
+                          ))}
+                        </div>
+                        <div style={{ marginTop: '10px', fontWeight: 'bold', color: '#27ae60', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                          <div>
+                            正確答案：
+                            <select 
+                              value={editingFinalData.ans} 
+                              onChange={(e) => setEditingFinalData({ ...editingFinalData, ans: e.target.value })}
+                              style={{ marginLeft: '5px', padding: '5px', borderRadius: '4px' }}
+                            >
+                              <option value="A">A</option><option value="B">B</option><option value="C">C</option><option value="D">D</option>
+                            </select>
+                          </div>
+                          <div>
+                            <button onClick={saveEditingFinal} style={{ ...miniBtnStyle, backgroundColor: '#27ae60', color: 'white', borderColor: '#27ae60', marginRight: '5px' }}>💾 儲存</button>
+                            <button onClick={() => setEditingFinalId(null)} style={{ ...miniBtnStyle, backgroundColor: '#95a5a6', color: 'white', borderColor: '#95a5a6' }}>❌ 取消</button>
+                          </div>
+                        </div>
+                      </div>
+                    ) : (
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                        <div style={{ flex: 1, paddingRight: '10px', lineHeight: '1.4' }}>
+                          <span style={{ fontWeight: 'bold', color: '#34495e' }}>{i + 1}.</span> {q.q}
+                        </div>
+                        <div style={{ display: 'flex', gap: '5px', flexShrink: 0 }}>
+                          <button onClick={() => startEditingFinal(q)} style={{ ...miniBtnStyle, color: '#f39c12', borderColor: '#f39c12' }}>✏️</button>
+                          <button onClick={() => deleteFinalQuestion(q.id)} style={{ ...miniBtnStyle, color: '#e74c3c', borderColor: '#e74c3c' }}>🗑️</button>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                ))
               ) : (
                 <p style={{ color: '#e74c3c', fontWeight: 'bold' }}>⚠️ 目前線上沒有題庫！夥伴無法測驗！請趕快上傳或匯入題目並按發布。</p>
               )}
@@ -398,7 +482,6 @@ function AdminPanel() {
         </div>
 
         <div style={cardStyle}>
-          {/* 🌟 加入刷新成績的按鈕 */}
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '15px' }}>
             <h3 style={{ margin: 0 }}>
               📈 夥伴考核成績紀錄 
