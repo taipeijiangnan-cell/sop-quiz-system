@@ -1,8 +1,15 @@
+import os
+import json
+import random
+import re
+import io
+import requests
+import pypdf
+import docx
+import psycopg2
+from typing import List
 from fastapi import FastAPI, HTTPException, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
-import json, io, pypdf, docx, requests, re, os, random
-import psycopg2 
-from typing import List
 
 app = FastAPI(title="考核系統後端")
 
@@ -29,13 +36,18 @@ def init_db():
     try:
         conn = get_db()
         cursor = conn.cursor()
+        # 建立草稿與線上題庫表
         cursor.execute("CREATE TABLE IF NOT EXISTS temp_qs (id INTEGER PRIMARY KEY, data TEXT)")
         cursor.execute("CREATE TABLE IF NOT EXISTS final_qs (id INTEGER PRIMARY KEY, data TEXT)")
         
+        # 建立 records 表 (包含 emp_id, name, score, category, detail)
         try:
             cursor.execute("SELECT category FROM records LIMIT 1")
-        except:
+        except psycopg2.errors.UndefinedColumn:
+            conn.rollback()
             cursor.execute("DROP TABLE IF EXISTS records")
+        except Exception:
+            conn.rollback()
             
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS records (
@@ -53,6 +65,7 @@ def init_db():
     except Exception as e:
         print(f"資料庫初始化失敗: {e}")
 
+# 啟動時初始化資料庫
 init_db()
 
 async def extract_text(file: UploadFile):
@@ -67,8 +80,10 @@ async def extract_text(file: UploadFile):
         elif file.filename.lower().endswith(".docx"):
             doc = docx.Document(io.BytesIO(content))
             for p in doc.paragraphs: text += p.text + "\n"
-        else: text += content.decode("utf-8")
-    except Exception as e: print(f"檔案解析錯誤: {e}")
+        else: 
+            text += content.decode("utf-8")
+    except Exception as e: 
+        print(f"檔案解析錯誤: {e}")
     
     text = re.sub(r'[\r\t]+', ' ', text)
     text = re.sub(r'(.)\1{4,}', '', text)
@@ -166,7 +181,7 @@ async def generate_quiz(files: List[UploadFile] = File(...)):
                 "options": opts,
                 "ans": str(x.get('ans', 'A')).upper(),
                 "category": "未分類",
-                "image": "" # 🌟 確保新增圖片儲存欄位
+                "image": ""
             })
         
         combined = existing + new_qs
@@ -174,58 +189,54 @@ async def generate_quiz(files: List[UploadFile] = File(...)):
             "INSERT INTO temp_qs (id, data) VALUES (1, %s) ON CONFLICT (id) DO UPDATE SET data = EXCLUDED.data", 
             (json.dumps(combined),)
         )
-        conn.commit(); conn.close()
+        conn.commit()
+        conn.close()
         return {"status": "ok", "count": len(combined)}
     except Exception as e: 
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.delete("/admin/temp-clear")
-async def clear_temp():
-    conn = get_db()
-    cursor = conn.cursor()
-    cursor.execute("DELETE FROM temp_qs")
-    conn.commit(); conn.close()
-    return {"status": "ok"}
-
-@app.post("/admin/save-temp")
-async def save_temp(data: List[dict]):
+@app.get("/get-questions")
+async def get_qs(emp_id: str, category: str = "全部"):
     try:
         conn = get_db()
         cursor = conn.cursor()
-        cursor.execute(
-            "INSERT INTO temp_qs (id, data) VALUES (1, %s) ON CONFLICT (id) DO UPDATE SET data = EXCLUDED.data", 
-            (json.dumps(data),)
-        )
-        conn.commit(); conn.close()
-        return {"status": "ok"}
+        
+        # 1. 檢查該工號是否已經考過該分類
+        cursor.execute("SELECT score FROM records WHERE emp_id=%s AND category=%s", (emp_id, category))
+        if cursor.fetchone():
+            conn.close()
+            raise HTTPException(status_code=403, detail="此工號已完成此項目考核")
+            
+        # 2. 抓取線上題庫
+        cursor.execute("SELECT data FROM final_qs WHERE id=1")
+        data = cursor.fetchone()
+        conn.close()
+        
+        # 防呆處理：沒有資料時
+        if not data or not data[0] or data[0] == "[]":
+            raise HTTPException(status_code=400, detail="題庫尚未發布，請洽店長")
+        
+        try:
+            all_qs = json.loads(data[0])
+        except json.JSONDecodeError:
+            raise HTTPException(status_code=500, detail="題庫資料毀損，請店長重新發布")
+        
+        # 3. 根據選單分類篩選題目
+        if category != "全部":
+            filtered_qs = [q for q in all_qs if q.get("category", "未分類") == category]
+        else:
+            filtered_qs = all_qs
+            
+        if not filtered_qs:
+            raise HTTPException(status_code=400, detail=f"目前線上還沒有【{category}】分類的題目喔！")
+            
+        return random.sample(filtered_qs, min(20, len(filtered_qs)))
+        
+    except HTTPException:
+        raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-@app.get("/get-questions")
-async def get_qs(emp_id: str, category: str = "全部"):
-    conn = get_db()
-    cursor = conn.cursor()
-    
-    cursor.execute("SELECT score FROM records WHERE emp_id=%s AND category=%s", (emp_id, category))
-    if cursor.fetchone():
-        conn.close(); raise HTTPException(status_code=403, detail="此工號已完成此項目考核")
-        
-    cursor.execute("SELECT data FROM final_qs WHERE id=1")
-    data = cursor.fetchone()
-    conn.close()
-    if not data: raise HTTPException(status_code=400, detail="題庫未就緒")
-    
-    all_qs = json.loads(data[0])
-    
-    if category != "全部":
-        filtered_qs = [q for q in all_qs if q.get("category", "未分類") == category]
-    else:
-        filtered_qs = all_qs
-        
-    if not filtered_qs:
-        raise HTTPException(status_code=400, detail=f"目前線上還沒有【{category}】分類的題目喔！")
-        
-    return random.sample(filtered_qs, min(20, len(filtered_qs)))
+        print(f"Error in get_qs: {e}")
+        raise HTTPException(status_code=500, detail="伺服器內部錯誤，請檢查 Logs")
 
 @app.post("/submit")
 async def submit(data: dict):
@@ -245,10 +256,37 @@ async def submit(data: dict):
                DO UPDATE SET name = EXCLUDED.name, score = EXCLUDED.score, detail = EXCLUDED.detail""", 
             (emp_id, name, score, category, json.dumps(detail))
         )
-        conn.commit(); conn.close()
+        conn.commit()
+        conn.close()
         return {"status": "ok"}
     except Exception as e:
         print(f"Submit error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+# ================= 管理員後台 API =================
+
+@app.delete("/admin/temp-clear")
+async def clear_temp():
+    conn = get_db()
+    cursor = conn.cursor()
+    cursor.execute("DELETE FROM temp_qs")
+    conn.commit()
+    conn.close()
+    return {"status": "ok"}
+
+@app.post("/admin/save-temp")
+async def save_temp(data: List[dict]):
+    try:
+        conn = get_db()
+        cursor = conn.cursor()
+        cursor.execute(
+            "INSERT INTO temp_qs (id, data) VALUES (1, %s) ON CONFLICT (id) DO UPDATE SET data = EXCLUDED.data", 
+            (json.dumps(data),)
+        )
+        conn.commit()
+        conn.close()
+        return {"status": "ok"}
+    except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/admin/current-final")
@@ -258,7 +296,7 @@ async def get_final():
     cursor.execute("SELECT data FROM final_qs WHERE id=1")
     data = cursor.fetchone()
     conn.close()
-    return json.loads(data[0]) if data else []
+    return json.loads(data[0]) if data and data[0] else []
 
 @app.get("/admin/temp-questions")
 async def get_temp():
@@ -267,7 +305,7 @@ async def get_temp():
     cursor.execute("SELECT data FROM temp_qs WHERE id=1")
     data = cursor.fetchone()
     conn.close()
-    return json.loads(data[0]) if data else []
+    return json.loads(data[0]) if data and data[0] else []
 
 @app.post("/admin/publish-questions")
 async def publish(data: List[dict]):
@@ -276,7 +314,8 @@ async def publish(data: List[dict]):
         cursor = conn.cursor()
         cursor.execute("DELETE FROM final_qs")
         cursor.execute("INSERT INTO final_qs (id, data) VALUES (1, %s)", (json.dumps(data),))
-        conn.commit(); conn.close()
+        conn.commit()
+        conn.close()
         return {"status": "ok"}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -291,16 +330,27 @@ async def get_recs():
         conn.close()
         result = []
         for r in recs:
-            try: det = json.loads(r[4]) if r[4] else []
-            except: det = []
-            result.append({"emp_id": r[0], "name": r[1], "score": r[2], "category": r[3] or "全部", "detail": det})
+            try: 
+                det = json.loads(r[4]) if r[4] else []
+            except: 
+                det = []
+            result.append({
+                "emp_id": r[0], 
+                "name": r[1], 
+                "score": r[2], 
+                "category": r[3] or "全部", 
+                "detail": det
+            })
         return result
-    except: return []
+    except Exception as e:
+        print(f"Error fetching records: {e}")
+        return []
 
 @app.delete("/admin/records/clear")
 async def clear_recs():
     conn = get_db()
     cursor = conn.cursor()
     cursor.execute("DELETE FROM records")
-    conn.commit(); conn.close()
+    conn.commit()
+    conn.close()
     return {"status": "ok"}
