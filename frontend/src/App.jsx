@@ -170,8 +170,7 @@ function App() {
               <option value="全部">全部 (混和隨機)</option>
               <option value="三崗位">三崗位</option>
               <option value="衛檢流程">衛檢流程</option>
-              <option value="新品話術">新品話術</option>
-              <option value="新品操作">新品操作</option>
+              <option value="新品操作與話術">新品操作與話術</option>
             </select>
           </div>
 
@@ -509,8 +508,7 @@ function AdminPanel() {
                   <option value="全部">全部</option>
                   <option value="三崗位">三崗位</option>
                   <option value="衛檢流程">衛檢流程</option>
-                  <option value="新品話術">新品話術</option>
-                  <option value="新品操作">新品操作</option>
+                  <option value="新品操作與話術">新品操作與話術</option>
                   <option value="未分類">未分類</option>
                 </select>
               </div>
@@ -535,8 +533,7 @@ function AdminPanel() {
                             >
                               <option value="三崗位">三崗位</option>
                               <option value="衛檢流程">衛檢流程</option>
-                              <option value="新品話術">新品話術</option>
-                              <option value="新品操作">新品操作</option>
+                              <option value="新品操作與話術">新品操作與話術</option>
                               <option value="未分類">未分類</option>
                             </select>
                           </div>
@@ -634,8 +631,7 @@ function AdminPanel() {
                       <option value="全部">全部</option>
                       <option value="三崗位">三崗位</option>
                       <option value="衛檢流程">衛檢流程</option>
-                      <option value="新品話術">新品話術</option>
-                      <option value="新品操作">新品操作</option>
+                      <option value="新品操作與話術">新品操作與話術</option>
                       <option value="未分類">未分類</option>
                     </select>
                   </div>
@@ -656,8 +652,7 @@ function AdminPanel() {
                           >
                             <option value="三崗位">三崗位</option>
                             <option value="衛檢流程">衛檢流程</option>
-                            <option value="新品話術">新品話術</option>
-                            <option value="新品操作">新品操作</option>
+                            <option value="新品操作與話術">新品操作與話術</option>
                             <option value="未分類">未分類</option>
                           </select>
                         </div>
