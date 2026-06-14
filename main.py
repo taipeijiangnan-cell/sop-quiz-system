@@ -1,7 +1,7 @@
 from fastapi import FastAPI, HTTPException, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
 import json, io, pypdf, docx, requests, re, os, random
-import psycopg2 # 🌟 升級：引入企業級 PostgreSQL 引擎
+import psycopg2 
 from typing import List
 
 app = FastAPI(title="考核系統後端")
@@ -17,13 +17,11 @@ app.add_middleware(
 GROQ_API_KEY = os.getenv("GROQ_API_KEY", "").strip()
 DATABASE_URL = os.getenv("DATABASE_URL", "").strip()
 
-# 🌟 新增：連線到雲端資料庫的函數
 def get_db():
     if not DATABASE_URL:
         raise Exception("遺失 DATABASE_URL 環境變數！請到 Render 後台設定。")
     return psycopg2.connect(DATABASE_URL, sslmode='require')
 
-# 🌟 初始化雲端資料庫表格
 def init_db():
     if not DATABASE_URL:
         print("尚未設定 DATABASE_URL，等待設定...")
@@ -33,7 +31,22 @@ def init_db():
         cursor = conn.cursor()
         cursor.execute("CREATE TABLE IF NOT EXISTS temp_qs (id INTEGER PRIMARY KEY, data TEXT)")
         cursor.execute("CREATE TABLE IF NOT EXISTS final_qs (id INTEGER PRIMARY KEY, data TEXT)")
-        cursor.execute("CREATE TABLE IF NOT EXISTS records (emp_id TEXT PRIMARY KEY, name TEXT, score INTEGER, detail TEXT)")
+        
+        try:
+            cursor.execute("SELECT category FROM records LIMIT 1")
+        except:
+            cursor.execute("DROP TABLE IF EXISTS records")
+            
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS records (
+                emp_id TEXT, 
+                name TEXT, 
+                score INTEGER, 
+                category TEXT, 
+                detail TEXT,
+                PRIMARY KEY (emp_id, category)
+            )
+        """)
         conn.commit()
         conn.close()
         print("✅ 雲端資料庫連線與初始化成功！")
@@ -130,7 +143,6 @@ async def generate_quiz(files: List[UploadFile] = File(...)):
         if not parsed:
             raise Exception("AI 生成題目失敗，請確認檔案內容或稍後再試。")
         
-        # 🌟 雲端資料庫讀取現有草稿
         conn = get_db()
         cursor = conn.cursor()
         cursor.execute("SELECT data FROM temp_qs WHERE id=1")
@@ -152,11 +164,12 @@ async def generate_quiz(files: List[UploadFile] = File(...)):
                 "id": len(existing) + len(new_qs) + 1,
                 "q": q_text,
                 "options": opts,
-                "ans": str(x.get('ans', 'A')).upper()
+                "ans": str(x.get('ans', 'A')).upper(),
+                "category": "未分類",
+                "image": "" # 🌟 確保新增圖片儲存欄位
             })
         
         combined = existing + new_qs
-        # 🌟 雲端資料庫存入合併後的草稿
         cursor.execute(
             "INSERT INTO temp_qs (id, data) VALUES (1, %s) ON CONFLICT (id) DO UPDATE SET data = EXCLUDED.data", 
             (json.dumps(combined),)
@@ -189,19 +202,30 @@ async def save_temp(data: List[dict]):
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/get-questions")
-async def get_qs(emp_id: str):
+async def get_qs(emp_id: str, category: str = "全部"):
     conn = get_db()
     cursor = conn.cursor()
-    cursor.execute("SELECT score FROM records WHERE emp_id=%s", (emp_id,))
+    
+    cursor.execute("SELECT score FROM records WHERE emp_id=%s AND category=%s", (emp_id, category))
     if cursor.fetchone():
-        conn.close(); raise HTTPException(status_code=403, detail="此工號已完成考核")
+        conn.close(); raise HTTPException(status_code=403, detail="此工號已完成此項目考核")
         
     cursor.execute("SELECT data FROM final_qs WHERE id=1")
     data = cursor.fetchone()
     conn.close()
     if not data: raise HTTPException(status_code=400, detail="題庫未就緒")
+    
     all_qs = json.loads(data[0])
-    return random.sample(all_qs, min(20, len(all_qs)))
+    
+    if category != "全部":
+        filtered_qs = [q for q in all_qs if q.get("category", "未分類") == category]
+    else:
+        filtered_qs = all_qs
+        
+    if not filtered_qs:
+        raise HTTPException(status_code=400, detail=f"目前線上還沒有【{category}】分類的題目喔！")
+        
+    return random.sample(filtered_qs, min(20, len(filtered_qs)))
 
 @app.post("/submit")
 async def submit(data: dict):
@@ -209,14 +233,17 @@ async def submit(data: dict):
         name = data.get("user_name", "未知姓名")
         emp_id = data.get("emp_id", "未知工號")
         score = data.get("score", 0)
+        category = data.get("category", "全部") 
         detail = data.get("detail", [])
         
         conn = get_db()
         cursor = conn.cursor()
-        # 🌟 雲端資料庫成績寫入與防衝突機制
         cursor.execute(
-            "INSERT INTO records (emp_id, name, score, detail) VALUES (%s, %s, %s, %s) ON CONFLICT (emp_id) DO UPDATE SET name = EXCLUDED.name, score = EXCLUDED.score, detail = EXCLUDED.detail", 
-            (emp_id, name, score, json.dumps(detail))
+            """INSERT INTO records (emp_id, name, score, category, detail) 
+               VALUES (%s, %s, %s, %s, %s) 
+               ON CONFLICT (emp_id, category) 
+               DO UPDATE SET name = EXCLUDED.name, score = EXCLUDED.score, detail = EXCLUDED.detail""", 
+            (emp_id, name, score, category, json.dumps(detail))
         )
         conn.commit(); conn.close()
         return {"status": "ok"}
@@ -247,7 +274,7 @@ async def publish(data: List[dict]):
     try:
         conn = get_db()
         cursor = conn.cursor()
-        cursor.execute("DELETE FROM final_qs") # 清空舊題庫
+        cursor.execute("DELETE FROM final_qs")
         cursor.execute("INSERT INTO final_qs (id, data) VALUES (1, %s)", (json.dumps(data),))
         conn.commit(); conn.close()
         return {"status": "ok"}
@@ -259,14 +286,14 @@ async def get_recs():
     try:
         conn = get_db()
         cursor = conn.cursor()
-        cursor.execute("SELECT emp_id, name, score, detail FROM records")
+        cursor.execute("SELECT emp_id, name, score, category, detail FROM records") 
         recs = cursor.fetchall()
         conn.close()
         result = []
         for r in recs:
-            try: det = json.loads(r[3]) if r[3] else []
+            try: det = json.loads(r[4]) if r[4] else []
             except: det = []
-            result.append({"emp_id": r[0], "name": r[1], "score": r[2], "detail": det})
+            result.append({"emp_id": r[0], "name": r[1], "score": r[2], "category": r[3] or "全部", "detail": det})
         return result
     except: return []
 
