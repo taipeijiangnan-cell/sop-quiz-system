@@ -171,6 +171,9 @@ function App() {
               <option value="三崗位">三崗位</option>
               <option value="衛檢流程">衛檢流程</option>
               <option value="新品操作與話術">新品操作與話術</option>
+              <option value="前台操作">新品操作與話術</option>
+              <option value="吧檯操作">新品操作與話術</option>
+              <option value="廚房操作">新品操作與話術</option>
             </select>
           </div>
 
@@ -510,6 +513,9 @@ function AdminPanel() {
                   <option value="衛檢流程">衛檢流程</option>
                   <option value="新品操作與話術">新品操作與話術</option>
                   <option value="未分類">未分類</option>
+                  <option value="前台">前台</option>
+                  <option value="吧檯">吧檯</option>
+                  <option value="廚房">廚房</option>
                 </select>
               </div>
 
@@ -535,6 +541,9 @@ function AdminPanel() {
                               <option value="衛檢流程">衛檢流程</option>
                               <option value="新品操作與話術">新品操作與話術</option>
                               <option value="未分類">未分類</option>
+                              <option value="前台">前台</option>
+                              <option value="吧檯">吧檯</option>
+                              <option value="廚房">廚房</option>
                             </select>
                           </div>
                         </div>
@@ -633,6 +642,9 @@ function AdminPanel() {
                       <option value="衛檢流程">衛檢流程</option>
                       <option value="新品操作與話術">新品操作與話術</option>
                       <option value="未分類">未分類</option>
+                      <option value="前台">前台</option>
+                      <option value="吧檯">吧檯</option>
+                      <option value="廚房">廚房</option>
                     </select>
                   </div>
                 </div>
@@ -654,6 +666,9 @@ function AdminPanel() {
                             <option value="衛檢流程">衛檢流程</option>
                             <option value="新品操作與話術">新品操作與話術</option>
                             <option value="未分類">未分類</option>
+                            <option value="前台">前台</option>
+                            <option value="吧檯">吧檯</option>
+                            <option value="廚房">廚房</option>
                           </select>
                         </div>
                       </div>
