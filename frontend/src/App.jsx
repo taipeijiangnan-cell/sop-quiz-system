@@ -156,7 +156,7 @@ function App() {
     <div style={{ padding: '20px', maxWidth: '600px', margin: 'auto', fontFamily: 'sans-serif' }}>
       {view === 'login' && (
         <div style={{ textAlign: 'center', border: '2px solid #3498db', padding: '40px', borderRadius: '20px' }}>
-          <h2 style={{ color: '#2c3e50' }}>再睡五分鐘考核系統</h2>
+          <h2 style={{ color: '#2c3e50' }}>再睡5分鐘考核系統</h2>
           <input placeholder="您的姓名 (中文)" onChange={e => setUser({...user, name: e.target.value.trim()})} style={inputStyle} /><br/>
           <input placeholder="員工工號" onChange={e => setUser({...user, emp_id: e.target.value.trim()})} style={inputStyle} /><br/>
           
