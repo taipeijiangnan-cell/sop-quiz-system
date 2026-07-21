@@ -43,7 +43,7 @@ function App() {
   const [selectedCategory, setSelectedCategory] = useState('全部');
 
   useEffect(() => {
-    document.title = isAdmin ? "考核系統後端" : "再睡五分鐘考核系統";
+    document.title = isAdmin ? "考核系統後端" : "再睡5分鐘考核系統";
   }, [isAdmin]);
 
   const startQuiz = async () => {
